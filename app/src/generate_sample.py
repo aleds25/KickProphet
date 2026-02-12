@@ -4,8 +4,8 @@ import os
 # --- CONFIGURAZIONE ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Assumiamo che lo script sia in app/src, quindi risaliamo a app/data/processed
-INPUT_FILE = os.path.join(BASE_DIR, '..', 'data', 'processed', 'KICKSTARTER_CLEAN_BASE.csv')
-OUTPUT_FILE = os.path.join(BASE_DIR, '..', 'data', 'processed', 'KICKSTARTER_CLEAN_BASE_SAMPLE_3000.csv')
+INPUT_FILE = os.path.join(BASE_DIR, '..', 'data', 'processed', 'KICKSTARTER_TRAIN.csv')
+OUTPUT_FILE = os.path.join(BASE_DIR, '..', 'data', 'processed', 'KICKSTARTER_TRAIN_SAMPLE_5000.csv')
 
 def generate_sample():
     print(f"📂 Caricamento file sorgente: {os.path.basename(INPUT_FILE)}...")
@@ -22,7 +22,7 @@ def generate_sample():
         print(f"📊 Righe totali trovate: {total_rows}")
 
         # Se ci sono meno di 100 righe, prendiamo tutto
-        sample_size = min(3000, total_rows)
+        sample_size = min(5000, total_rows)
         
         # Generiamo il campione casuale (random_state fissa il risultato per riproducibilità)
         print(f"🎲 Estrazione di {sample_size} righe casuali...")
