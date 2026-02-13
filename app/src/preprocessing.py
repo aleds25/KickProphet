@@ -75,6 +75,7 @@ def main():
     if 'created_at' in df.columns:
         df['preparation_days'] = (df['launched_at'] - df['created_at']).dt.days
         df['preparation_days'] = df['preparation_days'].apply(lambda x: x if x >= 0 else 0)
+        df['preparation_days_log'] = np.log1p(df['preparation_days'])
 
     # C. TEXT FEATURES (Simple)
     df['name'] = df['name'].fillna('')
@@ -106,13 +107,7 @@ def main():
     print("✅ Goal convertito in USD e log-trasformato.")
 
     # 3c. FEATURE CROSSING (Financial Ratios)
-    if 'goal_usd' in df.columns and 'duration_days' in df.columns:
-        goal_per_day = df['goal_usd'] / (df['duration_days'].replace(0, 1)) # Prevent div by zero
-        df['goal_per_day_log'] = np.log1p(goal_per_day)
         
-    if 'preparation_days' in df.columns and 'duration_days' in df.columns:
-        prep_time_ratio = df['preparation_days'] / (df['duration_days'].replace(0, 1))
-        df['prep_time_ratio_log'] = np.log1p(prep_time_ratio)
 
     print("✅ Feature Crossing (Log-Financial Ratios) completato.")
 
@@ -150,11 +145,37 @@ def main():
     )
     print(f"✂️ Split completato. Train: {X_train.shape}, Test: {X_test.shape}")
 
-    # 6. IMPUTAZIONE (Stateful)
+    # 6. STATEFUL FEATURE ENGINEERING (Goal relative to category)
+    print("⏳ Calcolo mediale del goal per categoria (Cascata)...")
+    # Calcolo mediale su TRAIN per evitare leakage
+    sub_medians = X_train.groupby('sub_category')['goal_usd_log'].median()
+    main_medians = X_train.groupby('main_category')['goal_usd_log'].median()
+
+    def get_relative_goal(row, medians_sub, medians_main):
+        sub = row['sub_category']
+        main = row['main_category']
+        
+        median = medians_sub.get(sub, np.nan)
+        if pd.isna(median) or sub == 'Unknown':
+            median = medians_main.get(main, np.nan)
+        
+        if pd.isna(median) or median == 0:
+            return 1.0 # Fallback neutro se non c'è una mediana valida
+        
+        return row['goal_usd_log'] / median
+
+    X_train['goal_to_cat_ratio'] = X_train.apply(lambda r: get_relative_goal(r, sub_medians, main_medians), axis=1)
+    X_test['goal_to_cat_ratio'] = X_test.apply(lambda r: get_relative_goal(r, sub_medians, main_medians), axis=1)
+    
+    X_train['goal_to_cat_ratio_log'] = np.log1p(X_train['goal_to_cat_ratio'])
+    X_test['goal_to_cat_ratio_log'] = np.log1p(X_test['goal_to_cat_ratio'])
+    print("✅ Feature 'goal_to_cat_ratio_log' creata.")
+
+    # 7. IMPUTAZIONE (Stateful)
     cols_num = [
-        'duration_days', 'preparation_days', 'name_len', 'blurb_len', 'goal_usd_log',
+        'duration_days', 'preparation_days_log', 'name_len', 'blurb_len', 'goal_usd_log',
         'launch_month_sin', 'launch_month_cos', 'launch_day_sin', 'launch_day_cos', 
-        'goal_per_day_log', 'prep_time_ratio_log', 'has_video'
+        'goal_to_cat_ratio_log', 'has_video'
     ]
     for col in cols_num:
         if col in X_train.columns:
