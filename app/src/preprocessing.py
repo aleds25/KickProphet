@@ -164,11 +164,8 @@ def main():
         
         return row['goal_usd_log'] / median
 
-    X_train['goal_to_cat_ratio'] = X_train.apply(lambda r: get_relative_goal(r, sub_medians, main_medians), axis=1)
-    X_test['goal_to_cat_ratio'] = X_test.apply(lambda r: get_relative_goal(r, sub_medians, main_medians), axis=1)
-    
-    X_train['goal_to_cat_ratio_log'] = np.log1p(X_train['goal_to_cat_ratio'])
-    X_test['goal_to_cat_ratio_log'] = np.log1p(X_test['goal_to_cat_ratio'])
+    X_train['goal_to_cat_ratio_log'] = np.log1p(X_train.apply(lambda r: get_relative_goal(r, sub_medians, main_medians), axis=1))
+    X_test['goal_to_cat_ratio_log'] = np.log1p(X_test.apply(lambda r: get_relative_goal(r, sub_medians, main_medians), axis=1))
     print("✅ Feature 'goal_to_cat_ratio_log' creata.")
 
     # 7. IMPUTAZIONE (Stateful)
