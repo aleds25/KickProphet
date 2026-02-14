@@ -58,6 +58,9 @@ ONE_HOT_COLS = ['country', 'currency', 'main_category']
 # ──────────────────────────────────────────────
 #  MODEL PARAMETERS (DEFAULTS)
 # ──────────────────────────────────────────────
+MAX_TEXT_FEATURES = 150
+DECISION_THRESHOLD = 0.60
+
 LGBM_DEFAULT_PARAMS = {
     'n_estimators': 500,
     'learning_rate': 0.05,

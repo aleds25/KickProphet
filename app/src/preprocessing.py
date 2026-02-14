@@ -196,7 +196,7 @@ def feature_engineering_fit_transform(df):
     # 4. TF-IDF (Fit Vectorizer)
     print("Fitting TF-IDF Vectorizer...")
     df['text_clean'] = df['full_text'].apply(clean_text)
-    tfidf = TfidfVectorizer(max_features=300, stop_words='english')
+    tfidf = TfidfVectorizer(max_features=config.MAX_TEXT_FEATURES, stop_words='english')
     tfidf.fit(df['text_clean'])
     artifacts['tfidf_vectorizer'] = tfidf
 

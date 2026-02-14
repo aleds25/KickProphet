@@ -46,8 +46,8 @@ def objective(trial, X, y):
     # 5-Fold Stratified CV
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     
-    # Usiamo l'F1-score pesato come metrica di ottimizzazione
-    scores = cross_val_score(model, X, y, cv=cv, scoring='f1', n_jobs=-1)
+    # Usiamo il negative log loss come metrica di ottimizzazione (valori negativi, più vicini a 0 è meglio)
+    scores = cross_val_score(model, X, y, cv=cv, scoring='neg_log_loss', n_jobs=-1)
     
     return scores.mean()
 
@@ -65,18 +65,19 @@ def main():
         return
 
     # 2. Setup dello studio
+    # massimizziamo il neg_log_loss (quindi cerchiamo il valore più vicino a 0, es. -0.2 > -0.5)
     study = optuna.create_study(direction='maximize', study_name='lgbm_optimization')
     
     # 3. Esecuzione ricerca
-    n_trials = 20 # Reduced for quick check, can be increased
-    print(f"[>] Avvio ricerca con {n_trials} trials...")
+    n_trials = 50
+    print(f"[>] Avvio ricerca con {n_trials} trials (Objective: Negative Log Loss)...")
     study.optimize(lambda trial: objective(trial, X, y), n_trials=n_trials)
     
     # 4. Risultati
     print("\n" + "=" * 60)
     print("  [+] RISULTATI OTTIMIZZAZIONE")
     print("=" * 60)
-    print(f"  Miglior F1-score: {study.best_value:.4f}")
+    print(f"  Miglior Negative Log Loss: {study.best_value:.4f} (Log Loss: {-study.best_value:.4f})")
     
     # 5. Salvataggio parametri
     config_dir = os.path.dirname(config.OPTUNA_PARAMS_PATH)
