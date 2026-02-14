@@ -7,3 +7,5 @@ xgboost
 lightgbm
 jinja2
 joblib
+optuna
+pytest

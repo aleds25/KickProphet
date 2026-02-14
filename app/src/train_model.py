@@ -1,16 +1,7 @@
-"""
-train_model.py — Script di produzione per il modello finale.
-
-Addestra il modello vincitore (LightGBM) sull'intero Training Set,
-valuta sul Test Set e salva modello, metriche e grafici.
-
-Uso:
-    python app/src/train_model.py
-"""
-
 import pandas as pd
 import numpy as np
 import os
+import json
 import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -21,67 +12,52 @@ from sklearn.metrics import (
     ConfusionMatrixDisplay
 )
 
-
-# ──────────────────────────────────────────────
-#  CONFIGURAZIONE
-# ──────────────────────────────────────────────
-
-BASE_PATH = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_PATH, '..', 'data', 'processed')
-MODELS_DIR = os.path.join(BASE_PATH, '..', 'models')
-RESULTS_DIR = os.path.join(BASE_PATH, '..', 'results')
-
-MODEL_PARAMS = {
-    'n_estimators': 500,
-    'learning_rate': 0.05,
-    'num_leaves': 31,
-    'max_depth': -1,
-    'random_state': 42,
-    'n_jobs': -1,
-    'verbose': -1
-}
-
+try:
+    from app.src import config
+except ImportError:
+    import config
 
 # ──────────────────────────────────────────────
 #  FUNZIONI
 # ──────────────────────────────────────────────
 
 def load_data():
-    """Carica Training Set e Test Set."""
-    train_path = os.path.join(DATA_DIR, 'KICKSTARTER_TRAIN.csv')
-    test_path = os.path.join(DATA_DIR, 'KICKSTARTER_TEST.csv')
+    """Carica Training Set e Test Set processati."""
+    if not os.path.exists(config.TRAIN_DATA_PATH):
+        raise FileNotFoundError(f"File not found: {config.TRAIN_DATA_PATH}. Run preprocessing.py first.")
 
-    for path, name in [(train_path, 'TRAIN'), (test_path, 'TEST')]:
-        if not os.path.exists(path):
-            raise FileNotFoundError(
-                f"❌ File {name} non trovato: {path}\n"
-                f"   Esegui prima preprocessing.py"
-            )
+    train_df = pd.read_csv(config.TRAIN_DATA_PATH)
+    test_df = pd.read_csv(config.TEST_DATA_PATH)
 
-    train_df = pd.read_csv(train_path)
-    test_df = pd.read_csv(test_path)
-
-    X_train = train_df.drop('target', axis=1)
-    y_train = train_df['target']
-    X_test = test_df.drop('target', axis=1)
-    y_test = test_df['target']
+    X_train = train_df.drop(config.TARGET_COL, axis=1)
+    y_train = train_df[config.TARGET_COL]
+    X_test = test_df.drop(config.TARGET_COL, axis=1)
+    y_test = test_df[config.TARGET_COL]
 
     return X_train, y_train, X_test, y_test
 
+def get_model_params():
+    """Carica i parametri ottimali se esistono, altrimenti usa i default."""
+    final_params = config.LGBM_DEFAULT_PARAMS.copy()
+    
+    if os.path.exists(config.OPTUNA_PARAMS_PATH):
+        print(f"📖 Loaded optimized parameters from: {config.OPTUNA_PARAMS_PATH}")
+        with open(config.OPTUNA_PARAMS_PATH, 'r') as f:
+            best_params = json.load(f)
+            final_params.update(best_params)
+    else:
+        print("💡 Using default parameters.")
+        
+    return final_params
 
-def train(X_train, y_train):
-    """Addestra LightGBM sull'intero Training Set."""
-    print(f"🚀 Addestramento LightGBM... Data shape: {X_train.shape}")
-
-    model = LGBMClassifier(**MODEL_PARAMS)
+def train(X_train, y_train, params):
+    print(f"[*] Training LightGBM... Data shape: {X_train.shape}")
+    model = LGBMClassifier(**params)
     model.fit(X_train, y_train)
-
-    print("✅ Addestramento completato.")
+    print("[+] Training complete.")
     return model
 
-
 def evaluate(model, X_test, y_test):
-    """Valuta il modello sul Test Set e restituisce metriche."""
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1]
 
@@ -93,120 +69,79 @@ def evaluate(model, X_test, y_test):
         'roc_auc': roc_auc_score(y_test, y_proba)
     }
 
-    print("\n--- 📊 METRICHE SUL TEST SET ---")
+    print("\n--- TEST SET METRICS ---")
     for name, value in metrics.items():
-        print(f"  ✅ {name.upper()}: {value:.4f}")
+        print(f"  [+] {name.upper()}: {value:.4f}")
 
-    print(f"\n--- 📋 CLASSIFICATION REPORT ---\n")
+    print(f"\n--- CLASSIFICATION REPORT ---\n")
     print(classification_report(y_test, y_pred, target_names=['Failed (0)', 'Successful (1)']))
-
     return metrics, y_pred, y_proba
 
-
-def save_confusion_matrix(y_test, y_pred):
-    """Salva la Confusion Matrix come immagine."""
+def save_plots(model, X_train, y_test, y_pred, y_proba):
+    # Confusion Matrix
     fig, ax = plt.subplots(figsize=(7, 6))
     cm = confusion_matrix(y_test, y_pred)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Failed', 'Successful'])
-    disp.plot(cmap='Blues', ax=ax, values_format='d')
-    ax.set_title('Confusion Matrix — LightGBM (Test Set)', fontsize=13, fontweight='bold')
+    ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Failed', 'Successful']).plot(cmap='Blues', ax=ax, values_format='d')
+    ax.set_title('Confusion Matrix — LightGBM', fontsize=13)
     plt.tight_layout()
-
-    output_path = os.path.join(RESULTS_DIR, 'confusion_matrix_final.png')
-    plt.savefig(output_path, dpi=150)
+    plt.savefig(os.path.join(config.RESULTS_DIR, 'confusion_matrix_final.png'), dpi=150)
     plt.close()
-    print(f"📈 Confusion Matrix salvata: {output_path}")
 
-
-def save_roc_curve(y_test, y_proba):
-    """Salva la ROC Curve come immagine."""
+    # ROC Curve
     fig, ax = plt.subplots(figsize=(7, 6))
-
     fpr, tpr, _ = roc_curve(y_test, y_proba)
-    auc_val = roc_auc_score(y_test, y_proba)
-
-    ax.plot(fpr, tpr, color='#4C72B0', linewidth=2.5, label=f'LightGBM (AUC = {auc_val:.4f})')
-    ax.fill_between(fpr, tpr, alpha=0.15, color='#4C72B0')
-    ax.plot([0, 1], [0, 1], 'k--', alpha=0.5, label='Random (AUC = 0.5)')
-    ax.set_xlabel('False Positive Rate')
-    ax.set_ylabel('True Positive Rate')
-    ax.set_title('ROC Curve — LightGBM (Test Set)', fontsize=13, fontweight='bold')
+    ax.plot(fpr, tpr, label=f'AUC = {roc_auc_score(y_test, y_proba):.4f}')
+    ax.plot([0, 1], [0, 1], 'k--')
+    ax.set_title('ROC Curve', fontsize=13)
     ax.legend()
-    ax.grid(True, alpha=0.3)
     plt.tight_layout()
-
-    output_path = os.path.join(RESULTS_DIR, 'roc_curve_final.png')
-    plt.savefig(output_path, dpi=150)
+    plt.savefig(os.path.join(config.RESULTS_DIR, 'roc_curve_final.png'), dpi=150)
     plt.close()
-    print(f"📈 ROC Curve salvata: {output_path}")
 
-
-def save_feature_importance(model, feature_names):
-    """Salva il grafico Feature Importance (Top 20)."""
+    # Feature Importance
     importances = model.feature_importances_
-    fi_df = pd.DataFrame({'feature': feature_names, 'importance': importances})
-    fi_df = fi_df.sort_values(by='importance', ascending=False).head(20)
-
+    fi_df = pd.DataFrame({'feature': X_train.columns, 'importance': importances}).sort_values(by='importance', ascending=False).head(20)
     fig, ax = plt.subplots(figsize=(10, 8))
-    sns.barplot(x='importance', y='feature', data=fi_df, hue='feature', palette='viridis', legend=False, ax=ax)
-    ax.set_title('Top 20 Feature Importance — LightGBM', fontsize=13, fontweight='bold')
-    ax.set_xlabel('Importance')
-    ax.set_ylabel('')
+    sns.barplot(x='importance', y='feature', hue='feature', data=fi_df, palette='viridis', ax=ax, legend=False)
+    ax.set_title('Feature Importance (Top 20)', fontsize=13)
     plt.tight_layout()
-
-    output_path = os.path.join(RESULTS_DIR, 'feature_importance_final.png')
-    plt.savefig(output_path, dpi=150)
+    plt.savefig(os.path.join(config.RESULTS_DIR, 'feature_importance_final.png'), dpi=150)
     plt.close()
-    print(f"📈 Feature Importance salvata: {output_path}")
-
 
 # ──────────────────────────────────────────────
 #  MAIN
 # ──────────────────────────────────────────────
-
 def main():
-    # Crea cartelle output
-    os.makedirs(MODELS_DIR, exist_ok=True)
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-
     try:
-        # 1. Caricamento
         print("=" * 60)
-        print("  KickProphet — Training Modello Finale (LightGBM)")
+        print("  KickProphet — Final Model Training")
         print("=" * 60)
+        
+        # 1. Load Data
         X_train, y_train, X_test, y_test = load_data()
-        print(f"📊 Training Set: {X_train.shape}")
-        print(f"📊 Test Set:     {X_test.shape}")
-
-        # 2. Training
-        model = train(X_train, y_train)
-
-        # 3. Valutazione
+        
+        # 2. Train
+        params = get_model_params()
+        model = train(X_train, y_train, params)
+        
+        # 3. Evaluate
         metrics, y_pred, y_proba = evaluate(model, X_test, y_test)
-
-        # 4. Salvataggio Modello
-        model_path = os.path.join(MODELS_DIR, 'final_model.joblib')
-        joblib.dump(model, model_path)
-        print(f"\n💾 Modello salvato: {model_path}")
-
-        # 5. Salvataggio Metriche
-        metrics_path = os.path.join(RESULTS_DIR, 'metrics_final.csv')
-        pd.DataFrame([metrics]).to_csv(metrics_path, index=False)
-        print(f"📄 Metriche salvate: {metrics_path}")
-
-        # 6. Salvataggio Grafici
-        save_confusion_matrix(y_test, y_pred)
-        save_roc_curve(y_test, y_proba)
-        save_feature_importance(model, X_train.columns)
-
-        print("\n" + "=" * 60)
-        print("  ✅ Pipeline completata con successo!")
-        print("=" * 60)
+        
+        # 4. Save Model
+        joblib.dump(model, config.MODEL_PATH)
+        print(f"\n[+] Model saved: {config.MODEL_PATH}")
+        
+        # 5. Save Results
+        pd.DataFrame([metrics]).to_csv(os.path.join(config.RESULTS_DIR, 'metrics_final.csv'), index=False)
+        save_plots(model, X_train, y_test, y_pred, y_proba)
+        
+        # Save feature columns to ensure alignment during prediction
+        joblib.dump(X_train.columns.tolist(), os.path.join(config.ARTIFACTS_DIR, 'model_features.joblib'))
+        print(f"[+] Feature columns saved to artifacts.")
 
     except Exception as e:
-        print(f"\n❌ Errore: {e}")
+        print(f"\n❌ Error: {e}")
         raise
-
 
 if __name__ == "__main__":
     main()
