@@ -100,36 +100,55 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function displayResult(result) {
-        const percentageEl = document.querySelector('.percentage');
-        const circle = document.querySelector('.circle');
-        const statusTitle = document.getElementById('prediction-status');
-        const statusMessage = document.getElementById('prediction-message');
-        const resultBody = document.querySelector('.result-body');
+        // Elements
+        const resultCard = document.getElementById('result-card');
+        const predictionText = document.getElementById('prediction-text');
+        const progressBar = document.getElementById('progress-bar');
+        const progressPercent = document.getElementById('progress-percent');
+        const closeBtn = document.querySelector('.close-btn');
 
-        // Reset previous classes
-        resultBody.classList.remove('status-success', 'status-fail');
+        resultCard.classList.remove('hidden');
+        // Trigger reflow
+        void resultCard.offsetWidth;
+        resultCard.classList.add('visible');
 
-        // Update Text
-        percentageEl.textContent = result.percent;
+        // Parse percentage
+        const percent = Math.round(result.success_probability * 100);
 
-        // Update Ring
-        const percent = result.success_probability * 100;
-        // Stroke-dasharray: value, 100
-        // We want to animate to 'percent, 100'
-        // Reset to 0 first to animate? CSS transition handles it if we change the attr.
-        // SVG stroke-dasharray is often set via attribute.
-        circle.setAttribute('stroke-dasharray', `${percent}, 100`);
+        // Update Text Logic
+        let messageText = "";
+        const prob = result.success_probability;
 
-        // Update Status & Colors
+        if (prob < 0.1) messageText = "It's a disaster";
+        else if (prob < 0.2) messageText = "Miracle needed";
+        else if (prob < 0.3) messageText = "Uphill battle";
+        else if (prob < 0.4) messageText = "High risk";
+        else if (prob < 0.5) messageText = "Uncertain";
+        else if (prob < 0.6) messageText = "Potential";
+        else if (prob < 0.7) messageText = "Promising";
+        else if (prob < 0.8) messageText = "Strong contender";
+        else if (prob < 0.9) messageText = "Very likely";
+        else messageText = "Bank on it!";
+
+        // Update Content
+        predictionText.textContent = messageText;
+        progressPercent.textContent = result.percent;
+
+        // Reset styles
+        progressBar.style.width = '0%';
+        predictionText.className = '';
+
+        // Set Colors based on result (optional, but good for visual feedback)
         if (result.prediction === 'SUCCESS') {
-            statusTitle.textContent = 'Likely Success';
-            statusMessage.textContent = `Great news! This project has a high probability of reaching its goal (${result.percent}).`;
-            resultBody.classList.add('status-success');
+            predictionText.classList.add('text-success');
         } else {
-            statusTitle.textContent = 'High Risk';
-            statusMessage.textContent = `This project shows signs of risk. The estimated success probability is ${result.percent}. Consider adjusting the goal or duration.`;
-            resultBody.classList.add('status-fail');
+            predictionText.classList.add('text-fail');
         }
+
+        // Animate Bar
+        setTimeout(() => {
+            progressBar.style.width = `${percent}%`;
+        }, 100);
 
         // Show Card
         resultCard.classList.remove('hidden');
