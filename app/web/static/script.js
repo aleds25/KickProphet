@@ -3,6 +3,44 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultCard = document.getElementById('result-card');
     const predictBtn = document.getElementById('predict-btn');
     const closeBtn = document.querySelector('.close-btn');
+    const categorySelect = document.getElementById('category');
+    const subCategorySelect = document.getElementById('sub_category');
+    let categoryData = {};
+
+    // Fetch Categories
+    fetch('/categories')
+        .then(response => response.json())
+        .then(data => {
+            categoryData = data;
+            // Populate Main Categories
+            for (const category in categoryData) {
+                const option = document.createElement('option');
+                option.value = category;
+                option.textContent = category;
+                categorySelect.appendChild(option);
+            }
+        })
+        .catch(error => console.error('Error fetching categories:', error));
+
+    // Handle Category Change
+    categorySelect.addEventListener('change', function () {
+        const selectedCategory = this.value;
+        const subCategories = categoryData[selectedCategory] || [];
+
+        // Clear existing options
+        subCategorySelect.innerHTML = '<option value="" disabled selected>Select Sub-Category</option>';
+
+        // Enable Select
+        subCategorySelect.disabled = false;
+
+        // Populate Sub-Categories
+        subCategories.forEach(subCat => {
+            const option = document.createElement('option');
+            option.value = subCat;
+            option.textContent = subCat;
+            subCategorySelect.appendChild(option);
+        });
+    });
 
     // Close Result Card
     closeBtn.addEventListener('click', () => {
@@ -25,10 +63,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Handle Checkbox Manually (checkboxes are not included in entries if unchecked)
         data.has_video = document.getElementById('has_video').checked;
+        data.prelaunch_activated = document.getElementById('prelaunch_activated').checked;
 
         // Convert types
         data.goal = parseFloat(data.goal);
         data.duration_days = parseInt(data.duration_days);
+        data.preparation_days = parseFloat(data.preparation_days);
 
         try {
             // Send Request

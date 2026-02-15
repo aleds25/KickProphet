@@ -93,6 +93,7 @@ def prepare_single_sample(data, artifacts):
     
     # Optional Features (defaults if not provided)
     df['has_video'] = int(data.get('has_video', False))
+    df['prelaunch_activated'] = int(data.get('prelaunch_activated', False))
     
     prep_days = float(data.get('preparation_days', 0))
     df['preparation_days_log'] = np.log1p(prep_days)
@@ -167,10 +168,37 @@ def prepare_single_sample(data, artifacts):
     df['launch_day_cos'] = np.cos(2 * np.pi * launch_dt.weekday() / 7)
     df['is_weekend'] = 1 if launch_dt.weekday() >= 5 else 0
     
-    # Missing Cols (One Hot, etc)
+    # One-Hot Encoding Manual Setup
+    # Map input 'category' to 'main_category' feature
+    main_cat = data.get('category')
+    if main_cat:
+        # Check if the specific one-hot column exists in features (e.g. main_category_Technology)
+        col_name = f"main_category_{main_cat}"
+        # We set it to 1, but we need to make sure the column is added to df first or we can just add it
+        # However, checking against artifacts['features'] later handles the 0s.
+        # But we need to know valid feature names.
+        # Let's just create the column if it's a valid one-hot column (we assume features list has it)
+        # Actually, safer to iterate features or just set it if matches pattern.
+        # But we don't have the feature list easily accessible to check *existence* efficiently inside this loop if we iterate.
+        # Better strategy: pre-initialize all OHE cols to 0, then set active to 1.
+        pass
+    
+    # Initialize all potential OHE columns found in artifacts to 0
     for col in artifacts['features']:
         if col not in df.columns:
-            df[col] = 0 # Default for one-hot
+            df[col] = 0
+
+    # Set active OHE columns to 1
+    if main_cat:
+        col_name = f"main_category_{main_cat}"
+        if col_name in df.columns:
+            df[col_name] = 1
+            
+    country = data.get('country')
+    if country:
+        col_name = f"country_{country}"
+        if col_name in df.columns:
+            df[col_name] = 1
             
     # Reorder
     df_final = df[artifacts['features']]

@@ -63,16 +63,34 @@
                     </div>
 
                     <div class="form-group">
+                        <label for="preparation_days">Preparation Days</label>
+                        <input type="number" id="preparation_days" name="preparation_days" placeholder="e.g. 14"
+                            value="0" required>
+                    </div>
+
+                    <div class="form-group">
                         <label for="launch_date">Planned Launch Date</label>
                         <input type="date" id="launch_date" name="launch_date" required>
                     </div>
 
                     <div class="form-group"
-                        style="grid-column: span 2; display: flex; align-items: center; justify-content: space-between; background: var(--input-bg); padding: 10px 16px; border-radius: 12px; border: 1px solid var(--input-border);">
+                        style="grid-column: span 2; display: flex; align-items: center; justify-content: space-between; background: var(--input-bg); padding: 10px 16px; border-radius: 12px; border: 1px solid var(--input-border); margin-bottom: 10px;">
                         <label for="has_video" style="margin: 0; color: var(--text-primary); cursor: pointer;">Does the
                             project have a video?</label>
                         <label class="switch">
                             <input type="checkbox" id="has_video" name="has_video">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <div class="form-group"
+                        style="grid-column: span 2; display: flex; align-items: center; justify-content: space-between; background: var(--input-bg); padding: 10px 16px; border-radius: 12px; border: 1px solid var(--input-border);">
+                        <label for="prelaunch_activated"
+                            style="margin: 0; color: var(--text-primary); cursor: pointer;">
+                            Was the pre-launch page activated?
+                        </label>
+                        <label class="switch">
+                            <input type="checkbox" id="prelaunch_activated" name="prelaunch_activated">
                             <span class="slider round"></span>
                         </label>
                     </div>
@@ -96,22 +114,15 @@
                         <label for="category">Category</label>
                         <select id="category" name="category" required>
                             <option value="" disabled selected>Select Category</option>
-                            <option value="Technology">Technology</option>
-                            <option value="Games">Games</option>
-                            <option value="Design">Design</option>
-                            <option value="Film & Video">Film & Video</option>
-                            <option value="Music">Music</option>
-                            <option value="Publishing">Publishing</option>
-                            <option value="Fashion">Fashion</option>
-                            <option value="Food">Food</option>
-                            <option value="Art">Art</option>
+                            <!-- Options populated dynamically -->
                         </select>
                     </div>
 
                     <div class="form-group">
                         <label for="sub_category">Sub-Category</label>
-                        <input type="text" id="sub_category" name="sub_category" placeholder="e.g. Tabletop Games"
-                            required>
+                        <select id="sub_category" name="sub_category" required disabled>
+                            <option value="" disabled selected>Select a Category First</option>
+                        </select>
                     </div>
                 </div>
 
