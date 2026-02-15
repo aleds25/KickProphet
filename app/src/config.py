@@ -53,7 +53,8 @@ NUM_COLS_IMPUTE = [
     'launch_month_sin', 'launch_month_cos', 'launch_day_sin', 'launch_day_cos', 
     'goal_to_cat_diff', 'has_video', 'goal_per_day',
     'name_word_count', 'blurb_word_count', 'is_weekend', 'name_is_upper',
-    'sentiment_polarity', 'sentiment_subjectivity', 'readability_score'
+    'sentiment_polarity', 'sentiment_subjectivity', 'readability_score',
+    'desc_cat_similarity', 'avg_word_len', 'digit_ratio'
 ]
 
 CAT_COLS_IMPUTE = ['country', 'main_category']
@@ -65,12 +66,12 @@ ONE_HOT_COLS = ['country', 'main_category']
 #  NLP CONFIG
 # ──────────────────────────────────────────────
 NLP_MODEL_NAME = 'all-MiniLM-L6-v2'
-PCA_COMPONENTS = 30  # Reduce 384 dims to 30
+PCA_COMPONENTS = 64  # Reduce 384 dims to 64
 
 # ──────────────────────────────────────────────
 #  MODEL PARAMETERS (DEFAULTS)
 # ──────────────────────────────────────────────
-MAX_TEXT_FEATURES = 100 # Reduced since we use embeddings now
+MAX_TEXT_FEATURES = 1000 # Increased to capture more vocabulary
 DECISION_THRESHOLD = 0.60
 
 LGBM_DEFAULT_PARAMS = {
