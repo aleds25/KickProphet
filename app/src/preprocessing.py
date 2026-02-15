@@ -11,6 +11,7 @@ from sklearn.decomposition import PCA
 from sentence_transformers import SentenceTransformer
 from textblob import TextBlob
 import textstat
+from sklearn.metrics.pairwise import cosine_similarity
 
 try:
     from app.src import config
@@ -78,7 +79,16 @@ def get_nlp_features(text):
     except:
         readability = 50 
         
-    return polarity, subjectivity, readability
+    # Valid / Garbage Detection
+    # 1. Avg Word Length
+    words = text.split()
+    avg_word_len = sum(len(w) for w in words) / len(words) if words else 0
+    
+    # 2. Digit Ratio
+    digit_count = sum(c.isdigit() for c in text)
+    digit_ratio = digit_count / len(text) if len(text) > 0 else 0
+        
+    return polarity, subjectivity, readability, avg_word_len, digit_ratio
 
 def get_embeddings(texts, model_name=config.NLP_MODEL_NAME):
     """Generates dense vector embeddings."""
@@ -174,13 +184,38 @@ def feature_engineering_fit_transform(df):
     # 1. Clean Text & Basic NLP
     df['text_clean'] = df['full_text'].apply(clean_text)
     
-    print("[*] Extracting Sentiment & Readability...")
+    print("[*] Extracting Sentiment, Readability, & Garbage Metrics...")
     nlp_stats = df['full_text'].astype(str).apply(lambda x: pd.Series(get_nlp_features(x)))
-    df[['sentiment_polarity', 'sentiment_subjectivity', 'readability_score']] = nlp_stats
+    df[['sentiment_polarity', 'sentiment_subjectivity', 'readability_score', 'avg_word_len', 'digit_ratio']] = nlp_stats
     
-    # 2. Embeddings (The "Spectacular" Component)
-    print("[*] Generating Semantic Embeddings...")
-    embeddings = get_embeddings(df['full_text'].fillna("").tolist())
+    # 2. Embeddings & Semantic Coherence
+    print("[*] Generating Semantic Embeddings & Coherence Scores...")
+    # Load model once to encode both text and categories
+    model = SentenceTransformer(config.NLP_MODEL_NAME)
+    
+    # A. Text Embeddings
+    text_embeddings = model.encode(df['full_text'].fillna("").tolist(), show_progress_bar=True, normalize_embeddings=True)
+    
+    # B. Category Embeddings (Coherence Check)
+    # Get unique sub-categories to avoid re-encoding millions of times
+    unique_cats = df['sub_category'].unique().astype(str)
+    cat_embeddings_dict = {cat: model.encode(cat, normalize_embeddings=True) for cat in unique_cats}
+    
+    # Map embeddings to dataframe rows
+    # Note: Doing this row-by-row can be slow, vectorizing is better.
+    # We'll create a matrix of category embeddings aligned with df
+    cat_embeds_matrix = np.array([cat_embeddings_dict[x] for x in df['sub_category'].astype(str)])
+    
+    # Calculate Cosine Similarity (Dot product of normalized vectors)
+    # SentenceTransformer embeddings are normalized by default? Usually yes.
+    # We verify normalization or just use cosine_similarity function
+    
+    # Efficient calculation: diagonal of (A . B^T)
+    # But we want row-wise dot product: sum(A * B, axis=1)
+    coherence_scores = np.sum(text_embeddings * cat_embeds_matrix, axis=1)
+    df['desc_cat_similarity'] = coherence_scores
+    
+    embeddings = text_embeddings # For PCA later
     
     # 3. PCA on Embeddings
     print(f"[*] Reducing Dimensions with PCA (n={config.PCA_COMPONENTS})...")
@@ -285,13 +320,25 @@ def feature_engineering_transform_new(df):
     # 1. Clean Text & Basic NLP
     df['text_clean'] = df['full_text'].apply(clean_text)
     
-    print("[*] Extracting Sentiment & Readability...")
+    print("[*] Extracting Sentiment, Readability & Garbage Metrics...")
     nlp_stats = df['full_text'].astype(str).apply(lambda x: pd.Series(get_nlp_features(x)))
-    df[['sentiment_polarity', 'sentiment_subjectivity', 'readability_score']] = nlp_stats
+    df[['sentiment_polarity', 'sentiment_subjectivity', 'readability_score', 'avg_word_len', 'digit_ratio']] = nlp_stats
     
-    # 2. Embeddings
-    print("[*] Generating Semantic Embeddings...")
-    embeddings = get_embeddings(df['full_text'].fillna("").tolist())
+    # 2. Embeddings & Coherence
+    print("[*] Generating Semantic Embeddings & Coherence...")
+    model = SentenceTransformer(config.NLP_MODEL_NAME) # Re-load model (inefficient but safe script-wise)
+    text_embeddings = model.encode(df['full_text'].fillna("").tolist(), show_progress_bar=True, normalize_embeddings=True)
+    
+    # Coherence
+    if 'sub_category' in df.columns:
+        unique_cats = df['sub_category'].unique().astype(str)
+        cat_embeddings_dict = {cat: model.encode(cat, normalize_embeddings=True) for cat in unique_cats}
+        cat_embeds_matrix = np.array([cat_embeddings_dict.get(str(x), cat_embeddings_dict.get('Unknown')) for x in df['sub_category']])
+        df['desc_cat_similarity'] = np.sum(text_embeddings * cat_embeds_matrix, axis=1)
+    else:
+        df['desc_cat_similarity'] = 0.5 # Default neutral if no category
+        
+    embeddings = text_embeddings
     
     # 3. PCA Transform
     print("[*] PCA Transform...")

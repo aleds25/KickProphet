@@ -7,6 +7,8 @@ from datetime import datetime
 from app.src import config
 from datetime import datetime
 from app.src import config
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 from app.src.preprocessing import clean_text, get_nlp_features, get_embeddings, cyclical_encoding
 
 import requests
@@ -52,6 +54,10 @@ def load_system():
     # Load Feature List (to ensure correct column order)
     artifacts['features'] = joblib.load(os.path.join(config.ARTIFACTS_DIR, 'model_features.joblib'))
     
+    # Load NLP Model for Coherence Check (Predict-time only)
+    # We could pickle this, but loading fresh is safer for version matches
+    artifacts['nlp_model'] = SentenceTransformer(config.NLP_MODEL_NAME)
+
     print("[+] System Loaded.")
     return artifacts
 
@@ -80,8 +86,10 @@ def prepare_single_sample(data, artifacts):
 
     df['goal_usd'] = df['goal'] * rate
     df['goal_usd_log'] = np.log1p(df['goal_usd'])
-    df['duration_days'] = float(df['duration_days'])
-    df['goal_per_day'] = df['goal_usd'] / (df['duration_days'] if df['duration_days'] > 0 else 1)
+    df['duration_days'] = pd.to_numeric(df['duration_days'], errors='coerce')
+    goal_usd = df['goal_usd'].iloc[0]
+    duration = df['duration_days'].iloc[0]
+    df['goal_per_day'] = goal_usd / (duration if duration > 0 else 1)
     
     # Optional Features (defaults if not provided)
     df['has_video'] = int(data.get('has_video', False))
@@ -99,15 +107,31 @@ def prepare_single_sample(data, artifacts):
     df['blurb_word_count'] = len(str(df['blurb'].iloc[0]).split())
     df['name_is_upper'] = 1 if str(df['name'].iloc[0]).isupper() else 0
     
-    # NLP: Sentiment & Readability
-    pol, sub, read = get_nlp_features(df['full_text'].iloc[0])
+    # NLP: Sentiment & Readability & Garbage
+    pol, sub, read, avg_len, dig_ratio = get_nlp_features(df['full_text'].iloc[0])
     df['sentiment_polarity'] = pol
     df['sentiment_subjectivity'] = sub
     df['readability_score'] = read
+    df['avg_word_len'] = avg_len
+    df['digit_ratio'] = dig_ratio
     
-    # NLP: Embeddings & PCA
-    embeddings = get_embeddings(df['full_text'].fillna("").tolist())
-    pca_out = artifacts['pca'].transform(embeddings)
+    # NLP: Embeddings & Coherence
+    # We need to generate embeddings using the simpler get_embeddings or the artifact model
+    # To ensure consistency with Coherence, let's use the artifact model
+    nlp_model = artifacts['nlp_model']
+    text_embedding = nlp_model.encode(df['full_text'].fillna("").iloc[0], normalize_embeddings=True)
+    
+    # Coherence Score
+    sub_cat = df['sub_category'].iloc[0]
+    cat_embedding = nlp_model.encode(str(sub_cat), normalize_embeddings=True)
+    
+    # Cosine Similarity (1D arrays need reshape)
+    coherence = cosine_similarity([text_embedding], [cat_embedding])[0][0]
+    df['desc_cat_similarity'] = coherence
+
+    # PCA (Expects list of embeddings)
+    embeddings_list = [text_embedding]
+    pca_out = artifacts['pca'].transform(embeddings_list)
     pca_cols = [f'pca_embed_{i}' for i in range(config.PCA_COMPONENTS)]
     df_pca = pd.DataFrame(pca_out, columns=pca_cols, index=df.index)
     df = pd.concat([df, df_pca], axis=1)
