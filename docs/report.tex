@@ -1,0 +1,142 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{xcolor}
+
+\geometry{margin=2.5cm}
+
+\title{\textbf{KickProphet: Predizione del Successo su Kickstarter} \\ \large Analisi del Ciclo di Vita di un Progetto di Machine Learning}
+\author{KickProphet Team}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Questo documento descrive l'intero ciclo di vita del progetto \textit{KickProphet}, finalizzato alla creazione di un modello di Machine Learning capace di predire la probabilità di successo di una campagna Kickstarter. Vengono dettagliate le fasi di raccolta dati, pulizia e deduplicazione, ingegnerizzazione delle feature (con focus su NLP avanzato e coerenza semantica), selezione del modello tramite ensemble e calibrazione delle probabilità. I risultati finali mostrano un'accuratezza dell'81.5\% e un ROC-AUC di 0.894, con una notevole robustezza contro input testuali incoerenti o di bassa qualità.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Introduzione}
+Il crowdfunding è diventato un metodo fondamentale per finanziare progetti innovativi. Tuttavia, il tasso di fallimento su piattaforme come Kickstarter è significativo. L'obiettivo di questo progetto è sviluppare un classificatore binario in grado di stimare la probabilità che un progetto raggiunga il suo obiettivo di finanziamento (\textit{Successful}) o fallisca (\textit{Failed}).
+
+La sfida principale risiede nella natura intrinsecamente rumorosa e sbilanciata dei dati, nonché nella necessità di estrarre informazioni significative da descrizioni testuali non strutturate, evitando che il modello ignori il testo a favore di variabili puramente finanziarie.
+
+\section{Pipeline dei Dati}
+
+\subsection{Raccolta e Unione}
+I dati grezzi provengono da molteplici scrape della piattaforma Kickstarter. Il primo passo è stato l'unione di questi dataset frammentati in un unico file \textit{KICKSTARTER\_RAW\_ALL\_MERGED.csv}.
+
+\subsection{Deduplicazione Personalizzata}
+Una criticità fondamentale nei dati di Kickstarter è la presenza di duplicati temporali: lo stesso progetto può apparire più volte in momenti diversi del suo ciclo di vita (es. ``live'', ``suspended'', ``successful'').
+Per garantire l'integrità del training set, è stata implementata una logica di deduplicazione rigorosa nel modulo \texttt{deduplication.py}:
+\begin{enumerate}
+    \item \textbf{Ordinamento Temporale}: I record sono stati ordinati per ID progetto e data di aggiornamento (\texttt{state\_changed\_at} o \texttt{deadline}).
+    \item \textbf{Selezione dell'Ultimo Stato}: Per ogni ID univoco, è stata mantenuta solo l'ultima occorrenza temporale, rappresentante lo stato finale noto del progetto.
+    \item \textbf{Filtro Stati}: Sono stati rimossi stati ambigui come ``live'', ``suspended'' o ``canceled'', mantenendo solo le classi target definitive: \texttt{successful} e \texttt{failed}.
+\end{enumerate}
+Questo processo ha prodotto il dataset pulito \textit{KICKSTARTER\_CLEAN\_BASE.csv}, eliminando il rischio di data leakage dovuto a snapshot multipli dello stesso progetto.
+
+\section{Preprocessing e Feature Engineering}
+La trasformazione dei dati grezzi in feature predittive è stata gestita dal modulo \texttt{preprocessing.py}, fondamentale per catturare le sfumature di successo.
+
+\subsection{Pulizia e Features Temporali}
+\begin{itemize}
+    \item \textbf{Gestione Date}: Conversione di timestamp Unix in oggetti datetime.
+    \item \textbf{Encoding Ciclico}: La data di lancio (\texttt{launched\_at}) è stata trasformata in coordinate seno/coseno per catturare la stagionalità (mese e giorno della settimana) senza introdurre discontinuità artificiali (es. tra Dicembre e Gennaio).
+    \item \textbf{Durata e Preparazione}: Sono state create le feature \texttt{duration\_days} (durata campagna) e \texttt{preparation\_days} (tempo tra creazione e lancio). Per quest'ultima, data la distribuzione a coda lunga, è stata applicata una trasformazione logaritmica ($\log(1+x)$).
+\end{itemize}
+
+\subsection{Features Finanziarie}
+\begin{itemize}
+    \item \textbf{Normalizzazione Valuta}: Tutti gli obiettivi (\texttt{goal}) sono stati convertiti in USD usando i tassi di cambio statici (\texttt{static\_usd\_rate}) per comparabilità.
+    \item \textbf{Trasformazione Logaritmica}: L'obiettivo (\texttt{goal\_usd}) è stato trasformato logaritmicamente per gestire l'enorme varianza tra piccoli progetti amatoriali e grandi campagne industriali.
+    \item \textbf{Goal Per Day}: Il tasso di finanziamento giornaliero richiesto (\texttt{goal\_per\_day}) è stato calcolato come indicatore di ``pressione'' finanziaria.
+\end{itemize}
+
+\subsection{Natural Language Processing (NLP) Avanzato}
+Uno degli aspetti più innovativi del progetto è l'analisi profonda del testo (\texttt{name} e \texttt{blurb}) per superare la cecità dei modelli classici al contenuto semantico.
+\begin{itemize}
+    \item \textbf{Garbage Detection}: Sono stati introdotti controlli di qualità del testo come la lunghezza media delle parole (\texttt{avg\_word\_len}) e la ratio numerica (\texttt{digit\_ratio}) per penalizzare descrizioni prive di senso (es. keyboard smashing).
+    \item \textbf{Semantic Coherence Score}: Per contrastare la dominanza di categorie ``forti'' (come Hardware), è stato calcolato un punteggio di \textbf{Coerenza Semantica} (\texttt{desc\_cat\_similarity}). Questo valore rappresenta la Cosine Similarity tra l'embedding della descrizione e l'embedding del nome della categoria. Progetti con descrizioni incoerenti rispetto alla categoria (es. quadri in Hardware) ricevono penalità significative.
+    \item \textbf{Deep Semantic Embeddings (SBERT)}: È stato utilizzato un modello pre-addestrato (\texttt{all-MiniLM-L6-v2}) per generare vettori densi. La dimensionalità è stata aumentata a 64 componenti principali (PCA) per mantenere una risoluzione semantica elevata.
+    \item \textbf{Expanded TF-IDF}: Il vocabolario monitorato è stato esteso alle 1000 parole chiave più rilevanti per catturare termini di nicchia e specificità del linguaggio.
+\end{itemize}
+
+\subsection{Encoding delle Categorie}
+Le categorie di Kickstarter sono gerarchiche (Category / Sub-category).
+\begin{itemize}
+    \item \textbf{Main Category}: Codificata con One-Hot Encoding (bassa cardinalità).
+    \item \textbf{Sub Category}: Codificata con \textbf{Target Encoding} (con smoothing). Ogni sottocategoria è stata sostituita dalla media storica di successo (target mean), pesata con la media globale per gestire categorie rare.
+\end{itemize}
+
+\section{Selezione del Modello (Model Selection)}
+La fase di selezione del modello (\texttt{3\_Model\_Selection.ipynb}) ha confrontato diverse architetture.
+I modelli basati su alberi decisionali (Tree-based) si sono dimostrati superiori per questo tipo di dati tabulari eterogenei.
+
+\subsection{Scelta dell'Ensemble}
+Invece di affidarsi a un singolo algoritmo, è stato scelto un \textbf{Voting Classifier (Soft Voting)} che combina:
+\begin{enumerate}
+    \item \textbf{LightGBM}: Ottimizzato per velocità e gestione di grandi dataset. Iperparametri sintonizzati con Optuna (500 stimatori, learning rate 0.05).
+    \item \textbf{XGBoost}: Noto per la sua robustezza e regolarizzazione, ideale per ridurre l'overfitting.
+\end{enumerate}
+L'ensemble permette di ridurre la varianza delle predizioni e migliorare la generalizzazione rispetto ai singoli modelli.
+
+\subsection{Calibrazione delle Probabilità}
+Poiché l'obiettivo è fornire una \textit{probabilità} di successo affidabile (non solo una classe 0/1), il modello finale è stato calibrato utilizzando \textbf{Isotonic Regression} su 5-Fold Cross-Validation. Questo garantisce che una probabilità predetta del 70\% corrisponda effettivamente a un tasso di successo storico del 70\%.
+
+\section{Valutazione e Risultati Finali}
+Il modello finale è stato valutato su un Test Set separato (20\% dei dati, stratificato), mai visto durante il training (\texttt{4\_Model\_Evaluation.ipynb}).
+
+\subsection{Metriche di Performance}
+I risultati ottenuti (\texttt{metrics\_final.csv}) sono i seguenti:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lc}
+\toprule
+\textbf{Metrica} & \textbf{Valore} \\
+\midrule
+Accuracy & 81.46\% \\
+ROC-AUC & 0.8941 \\
+Recall & 84.55\% \\
+F1-Score & 85.01\% \\
+Brier Score (Calibrazione) & 0.1264 \\
+\bottomrule
+\end{tabular}
+\caption{Risultati sul Test Set Aggiornati}
+\end{table}
+
+\subsection{Test di Robustezza Semantica}
+Per verificare l'efficacia delle nuove feature NLP, il modello è stato sottoposto a stress-test specifici (\texttt{test\_scenarios.py}) per simulare casi limite:
+
+\begin{enumerate}
+    \item \textbf{Input "Garbage"}: Un progetto con categoria forte (Hardware) ma descrizione casuale ("asdfghjkl").
+    \begin{itemize}
+        \item \textit{Risultato}: Probabilità di successo crollata al \textbf{6.6\%} (Fail).
+        \item \textit{Analisi}: Le metriche \texttt{avg\_word\_len} e \texttt{digit\_ratio} hanno correttamente identificato il testo come non valido.
+    \end{itemize}
+    \item \textbf{Input Incoerente}: Un progetto artistico ("Oil Painting") inserito forzatamente nella categoria Hardware (che ha un baseline di successo elevato).
+    \begin{itemize}
+        \item \textit{Risultato}: Probabilità di successo crollata al \textbf{6.5\%} (Fail).
+        \item \textit{Analisi}: Il \textbf{Coherence Score} ha rilevato la discrepanza semantica tra descrizione e categoria, penalizzando fortemente il progetto nonostante la categoria favorevole.
+    \end{itemize}
+\end{enumerate}
+
+Questi test confermano che il modello non è più "cieco" al testo, ma integra attivamente la qualità e la coerenza della descrizione nel processo decisionale.
+
+\section{Conclusione}
+Il progetto \textit{KickProphet} ha dimostrato che è possibile predire il successo di una campagna Kickstarter con elevata accuratezza (81.5\%+) integrando dati strutturati e un'analisi semantica del testo di nuova generazione.
+L'introduzione di tecniche di \textit{Semantic Coherence} e controlli di qualità testuale ha risolto le criticità tipiche dei modelli tabulari, rendendo il sistema robusto contro manipolazioni e incongruenze, e fornendo stime di rischio altamente affidabili per gli investitori.
+
+\end{document}
