@@ -10,25 +10,14 @@ if project_root not in sys.path:
 print(f"DEBUG: sys.path[0] = {sys.path[0]}")
 
 
+
 from app.src.predict import predict_success
-from app.src.config import DATA_DIR
-import json
 
 app = Flask(__name__)
 
 @app.route('/')
 def index():
     return render_template('index.html')
-
-@app.route('/categories')
-def get_categories():
-    try:
-        categories_path = os.path.join(DATA_DIR, 'category_hierarchy.json')
-        with open(categories_path, 'r') as f:
-            categories = json.load(f)
-        return jsonify(categories)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/predict', methods=['POST'])
 def predict():

@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let categoryData = {};
 
     // Fetch Categories
-    fetch('/categories')
+    fetch('/static/categories.json')
         .then(response => response.json())
         .then(data => {
             categoryData = data;

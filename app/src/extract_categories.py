@@ -12,8 +12,15 @@ def extract_category_hierarchy():
     """
     
     # Path to the dataset
+    # Calculate path relative to this script
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    web_static_dir = os.path.join(current_dir, '..', 'web', 'static')
+    
     dataset_path = os.path.join(DATA_DIR, 'KICKSTARTER_CLEAN_BASE.csv')
-    output_path = os.path.join(DATA_DIR, 'category_hierarchy.json')
+    output_path = os.path.join(web_static_dir, 'categories.json')
+    
+    # Ensure directory exists
+    os.makedirs(web_static_dir, exist_ok=True)
 
     print(f"Reading dataset from: {dataset_path}")
     
