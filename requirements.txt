@@ -9,3 +9,6 @@ jinja2
 joblib
 optuna
 pytest
+sentence-transformers
+textblob
+textstat

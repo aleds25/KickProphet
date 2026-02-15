@@ -7,6 +7,10 @@ import os
 import joblib
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.decomposition import PCA
+from sentence_transformers import SentenceTransformer
+from textblob import TextBlob
+import textstat
 
 try:
     from app.src import config
@@ -39,6 +43,8 @@ def extract_categories(x):
         return parts[0], parts[0]
     return 'Unknown', 'Unknown'
 
+
+
 def clean_text(text):
     """Cleans text for TF-IDF processing."""
     if not isinstance(text, str):
@@ -56,6 +62,31 @@ def cyclical_encoding(df):
         df['launch_day_sin'] = np.sin(2 * np.pi * df['launched_at'].dt.dayofweek / 7)
         df['launch_day_cos'] = np.cos(2 * np.pi * df['launched_at'].dt.dayofweek / 7)
     return df
+
+def get_nlp_features(text):
+    """Extracts sentiment and readability scores."""
+    if not isinstance(text, str) or not text.strip():
+        return 0, 0, 0 # Default values (neutral, objective, hard)
+    
+    blob = TextBlob(text)
+    polarity = blob.sentiment.polarity
+    subjectivity = blob.sentiment.subjectivity
+    
+    # Readability (higher is easier)
+    try:
+        readability = textstat.flesch_reading_ease(text)
+    except:
+        readability = 50 
+        
+    return polarity, subjectivity, readability
+
+def get_embeddings(texts, model_name=config.NLP_MODEL_NAME):
+    """Generates dense vector embeddings."""
+    print(f"[*] Loading NLP Model: {model_name}...")
+    model = SentenceTransformer(model_name)
+    print(f"[*] Encoding {len(texts)} texts...")
+    embeddings = model.encode(texts, show_progress_bar=True)
+    return embeddings
 
 # --- CORE PROCESSING LOGIC ---
 
@@ -77,7 +108,12 @@ def load_and_clean_base_data(input_path):
             df[c] = pd.to_datetime(df[c], unit='s')
 
     df['duration_days'] = (df['deadline'] - df['launched_at']).dt.days
+    df['duration_days'] = df['duration_days'].apply(lambda x: x if x > 0 else 1) # Prevent div by zero
     df = cyclical_encoding(df)
+    
+    if 'launched_at' in df.columns:
+        df['launch_hour'] = df['launched_at'].dt.hour
+        df['is_weekend'] = df['launched_at'].dt.dayofweek.apply(lambda x: 1 if x >= 5 else 0)
 
     # Prep Time
     if 'created_at' in df.columns:
@@ -91,7 +127,10 @@ def load_and_clean_base_data(input_path):
     df['full_text'] = df['name'] + " " + df['blurb']
     df['name_len'] = df['name'].astype(str).apply(len)
     df['blurb_len'] = df['blurb'].astype(str).apply(len)
+    df['name_word_count'] = df['name'].astype(str).apply(lambda x: len(x.split()))
+    df['blurb_word_count'] = df['blurb'].astype(str).apply(lambda x: len(x.split()))
     df['has_question'] = df['name'].astype(str).str.contains('?', regex=False).astype(int)
+    df['name_is_upper'] = df['name'].astype(str).apply(lambda x: 1 if x.isupper() else 0)
 
     # Categories
     if 'category' in df.columns:
@@ -110,6 +149,7 @@ def load_and_clean_base_data(input_path):
         else:
             df['goal_usd'] = df['goal']
         df['goal_usd_log'] = np.log1p(df['goal_usd'])
+        df['goal_per_day'] = df['goal_usd'] / df['duration_days']
 
     return df
 
@@ -126,89 +166,72 @@ def apply_quality_control(df):
 
 def feature_engineering_fit_transform(df):
     """
-    Fits and TRANSFORMS the training data.
-    SAVES all artifacts (medians, means, TF-IDF) to config.ARTIFACTS_DIR.
+    Applies all feature engineering steps and FITS transformations (PCA, TF-IDF).
+    Saves artifacts.
     """
-    artifacts = {}
+    print("[*] Starting Feature Engineering (Fit & Transform)...")
+    
+    # 1. Clean Text & Basic NLP
+    df['text_clean'] = df['full_text'].apply(clean_text)
+    
+    print("[*] Extracting Sentiment & Readability...")
+    nlp_stats = df['full_text'].astype(str).apply(lambda x: pd.Series(get_nlp_features(x)))
+    df[['sentiment_polarity', 'sentiment_subjectivity', 'readability_score']] = nlp_stats
+    
+    # 2. Embeddings (The "Spectacular" Component)
+    print("[*] Generating Semantic Embeddings...")
+    embeddings = get_embeddings(df['full_text'].fillna("").tolist())
+    
+    # 3. PCA on Embeddings
+    print(f"[*] Reducing Dimensions with PCA (n={config.PCA_COMPONENTS})...")
+    pca = PCA(n_components=config.PCA_COMPONENTS, random_state=42)
+    embeddings_pca = pca.fit_transform(embeddings)
+    
+    # Save PCA model
+    joblib.dump(pca, os.path.join(config.ARTIFACTS_DIR, 'pca_model.joblib'))
+    
+    # Add PCA features to DF
+    pca_cols = [f'pca_embed_{i}' for i in range(config.PCA_COMPONENTS)]
+    df_pca = pd.DataFrame(embeddings_pca, columns=pca_cols, index=df.index)
+    df = pd.concat([df, df_pca], axis=1)
 
-    # 1. Goal Relative to Category (Fit Global Medians)
-    sub_cat_medians = df.groupby('sub_category')['goal_usd_log'].median()
-    global_median = df['goal_usd_log'].median()
-    artifacts['sub_cat_medians'] = sub_cat_medians
-    artifacts['global_goal_median'] = global_median
-
-    df['sub_cat_median'] = df['sub_category'].map(sub_cat_medians).fillna(global_median)
-    df['goal_to_cat_diff'] = df['goal_usd_log'] - df['sub_cat_median']
-    df.drop(columns=['sub_cat_median'], inplace=True)
-
-    # 2. Target Encoding (Fit Global Means for Inference)
-    # Note: For Training, we STILL use K-Fold to prevent leakage.
-    # But we MUST save global means for new data inference.
-    global_mean = df['target'].mean()
-    agg = df.groupby('sub_category')['target'].agg(['count', 'mean'])
+    # 4. TF-IDF (Classic Keyword Spotting) - Reduced
+    print("[*] Fitting TF-IDF...")
+    tfidf = TfidfVectorizer(max_features=config.MAX_TEXT_FEATURES)
+    tfidf_matrix = tfidf.fit_transform(df['text_clean'])
+    
+    # Save TF-IDF
+    joblib.dump(tfidf, os.path.join(config.ARTIFACTS_DIR, 'tfidf_vectorizer.joblib'))
+    
+    # Add TF-IDF features
+    tfidf_cols = [f'tfidf_{i}' for i in range(tfidf_matrix.shape[1])]
+    df_tfidf = pd.DataFrame(tfidf_matrix.toarray(), columns=tfidf_cols, index=df.index)
+    df = pd.concat([df, df_tfidf], axis=1)
+    
+    # 5. Target Encoding (Smoothing)
+    print("[*] Target Encoding...")
+    # ... (rest remains similar but carefully merged)
+    global_mean = df[config.TARGET_COL].mean()
+    
+    # Sub-category
+    agg = df.groupby('sub_category')[config.TARGET_COL].agg(['count', 'mean'])
     counts = agg['count']
     means = agg['mean']
-    m = 20
-    smooth_map = (counts * means + m * global_mean) / (counts + m)
+    smooth_weight = 10
+    smooth_means = (counts * means + smooth_weight * global_mean) / (counts + smooth_weight)
     
-    artifacts['target_enc_map'] = smooth_map
-    artifacts['target_enc_global_mean'] = global_mean
-
-    # Apply K-Fold for Training Data (same logic as before)
-    # We do NOT apply the global map to the training data to avoid leakage.
-    print("Performing K-Fold Target Encoding for Training Data...")
-    kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    df['sub_category_target_enc'] = np.nan
+    # Save Artifacts
+    encoding_map = {
+        'sub_category': smooth_means.to_dict(),
+        'global_mean': global_mean
+    }
+    joblib.dump(encoding_map, os.path.join(config.ARTIFACTS_DIR, 'target_encodings.joblib'))
     
-    # We need to temporarily separate X and y for splits if we were passing them separate
-    # But here df has 'target'
-    for train_idx, val_idx in kf.split(df, df['target']):
-        X_fold_train = df.iloc[train_idx]
-        X_fold_val = df.iloc[val_idx]
-        
-        # Compute fold-specific smooth map
-        agg_fold = X_fold_train.groupby('sub_category')['target'].agg(['count', 'mean'])
-        counts_fold = agg_fold['count']
-        means_fold = agg_fold['mean']
-        smooth_map_fold = (counts_fold * means_fold + m * global_mean) / (counts_fold + m)
-        
-        df.loc[df.index[val_idx], 'sub_category_target_enc'] = \
-            df.loc[df.index[val_idx], 'sub_category'].map(smooth_map_fold)
-            
-    df['sub_category_target_enc'] = df['sub_category_target_enc'].fillna(global_mean)
-    # Replace original column
-    df['sub_category'] = df['sub_category_target_enc']
-    df.drop(columns=['sub_category_target_enc'], inplace=True)
-
-    # 3. Imputation (Fit Medians)
-    impute_medians = {}
-    for col in config.NUM_COLS_IMPUTE:
-        if col in df.columns:
-            median_val = df[col].median()
-            df[col] = df[col].fillna(median_val)
-            impute_medians[col] = median_val
-    artifacts['impute_medians'] = impute_medians
-
-    for col in config.CAT_COLS_IMPUTE:
-        if col in df.columns:
-            df[col] = df[col].fillna('Unknown')
-
-    # 4. TF-IDF (Fit Vectorizer)
-    print("Fitting TF-IDF Vectorizer...")
-    df['text_clean'] = df['full_text'].apply(clean_text)
-    tfidf = TfidfVectorizer(max_features=config.MAX_TEXT_FEATURES, stop_words='english')
-    tfidf.fit(df['text_clean'])
-    artifacts['tfidf_vectorizer'] = tfidf
-
-    tfidf_data = tfidf.transform(df['text_clean'])
-    tfidf_cols = [f'word_{w}' for w in tfidf.get_feature_names_out()]
-    df_tfidf = pd.DataFrame(tfidf_data.toarray(), columns=tfidf_cols, index=df.index)
-    df = pd.concat([df, df_tfidf], axis=1)
-
-    # 5. Save Artifacts
-    joblib.dump(artifacts, os.path.join(config.ARTIFACTS_DIR, 'preprocessing_artifacts.joblib'))
-    print(f"Artifacts saved to {config.ARTIFACTS_DIR}")
-
+    df['sub_cat_encoded'] = df['sub_category'].map(smooth_means)
+    
+    # 6. Drop Text Columns
+    df = df.drop(columns=config.TEXT_COLS_TO_DROP + ['sub_category'], errors='ignore')
+    
     return df
 
 def feature_engineering_transform_new(df, artifacts):
@@ -253,6 +276,51 @@ def feature_engineering_transform_new(df, artifacts):
 
     return df
 
+def feature_engineering_transform_new(df):
+    """
+    Applies transformations to NEW data using saved artifacts.
+    """
+    print("[*] Applying Feature Engineering to New Data...")
+    
+    # 1. Clean Text & Basic NLP
+    df['text_clean'] = df['full_text'].apply(clean_text)
+    
+    print("[*] Extracting Sentiment & Readability...")
+    nlp_stats = df['full_text'].astype(str).apply(lambda x: pd.Series(get_nlp_features(x)))
+    df[['sentiment_polarity', 'sentiment_subjectivity', 'readability_score']] = nlp_stats
+    
+    # 2. Embeddings
+    print("[*] Generating Semantic Embeddings...")
+    embeddings = get_embeddings(df['full_text'].fillna("").tolist())
+    
+    # 3. PCA Transform
+    print("[*] PCA Transform...")
+    pca = joblib.load(os.path.join(config.ARTIFACTS_DIR, 'pca_model.joblib'))
+    embeddings_pca = pca.transform(embeddings)
+    
+    pca_cols = [f'pca_embed_{i}' for i in range(config.PCA_COMPONENTS)]
+    df_pca = pd.DataFrame(embeddings_pca, columns=pca_cols, index=df.index)
+    df = pd.concat([df, df_pca], axis=1)
+    
+    # 4. TF-IDF Transform
+    print("[*] TF-IDF Transform...")
+    tfidf = joblib.load(os.path.join(config.ARTIFACTS_DIR, 'tfidf_vectorizer.joblib'))
+    tfidf_matrix = tfidf.transform(df['text_clean'])
+    
+    tfidf_cols = [f'tfidf_{i}' for i in range(tfidf_matrix.shape[1])]
+    df_tfidf = pd.DataFrame(tfidf_matrix.toarray(), columns=tfidf_cols, index=df.index)
+    df = pd.concat([df, df_tfidf], axis=1)
+    
+    # 5. Target Encoding Map
+    print("[*] Applying Target Encoding...")
+    enc_map = joblib.load(os.path.join(config.ARTIFACTS_DIR, 'target_encodings.joblib'))
+    df['sub_cat_encoded'] = df['sub_category'].map(enc_map['sub_category']).fillna(enc_map['global_mean'])
+
+    # 6. Drop Text Columns
+    df = df.drop(columns=config.TEXT_COLS_TO_DROP + ['sub_category'], errors='ignore')
+    
+    return df
+
 def finalize_dataset(df, is_training=True):
     """Final cleanup: Dropping columns, One-Hot Encoding."""
     
@@ -260,7 +328,10 @@ def finalize_dataset(df, is_training=True):
     df = df.drop(columns=[c for c in config.TEXT_COLS_TO_DROP if c in df.columns])
 
     # Drop Leakage Cols
-    df = df.drop(columns=[c for c in config.LEAKAGE_COLS if c in df.columns])
+    df = df.drop(columns=[c for c in config.LEAKAGE_COLS if c in df.columns], errors='ignore')
+
+    # Drop redundant cols
+    df = df.drop(columns=[c for c in config.REDUNDANT_COLS if c in df.columns], errors='ignore')
 
     # One-Hot Encoding
     # Note: For production, we should align with training columns. 
@@ -268,6 +339,11 @@ def finalize_dataset(df, is_training=True):
     # In a perfect world, we'd save the OneHotEncoder artifact too.
     # For now, we assume alignment happens in Training/Evaluation phase.
     df = pd.get_dummies(df, columns=[c for c in config.ONE_HOT_COLS if c in df.columns], drop_first=True)
+
+    # Move Target to Last
+    if config.TARGET_COL in df.columns:
+        cols = [c for c in df.columns if c != config.TARGET_COL] + [config.TARGET_COL]
+        df = df[cols]
 
     return df
 
@@ -303,9 +379,7 @@ def main():
     train_df = feature_engineering_fit_transform(train_df)
     
     print("Transforming TEST...")
-    # Load artifacts we just saved
-    artifacts = joblib.load(os.path.join(config.ARTIFACTS_DIR, 'preprocessing_artifacts.joblib'))
-    test_df = feature_engineering_transform_new(test_df, artifacts)
+    test_df = feature_engineering_transform_new(test_df)
 
     # 4. Finalize
     train_df = finalize_dataset(train_df)

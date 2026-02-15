@@ -11,9 +11,12 @@ from lightgbm import LGBMClassifier
 from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 from sklearn.metrics import (
     classification_report, confusion_matrix, roc_curve, roc_auc_score,
-    accuracy_score, precision_score, recall_score, f1_score,
+    accuracy_score, precision_score, recall_score, f1_score, fbeta_score,
     ConfusionMatrixDisplay, brier_score_loss
 )
+from sklearn.model_selection import cross_val_predict
+from xgboost import XGBClassifier
+from sklearn.ensemble import VotingClassifier
 
 try:
     from app.src import config
@@ -53,31 +56,72 @@ def get_model_params():
         
     return final_params
 
-def train(X_train, y_train, params):
+def optimize_threshold(y_true, y_proba, beta=0.5):
     """
-    Allena il modello base LightGBM e poi lo calibra.
-    Ritorna sia il modello calibrato (per predizioni) sia il base (per SHAP e analisi).
+    Finds the decision threshold that maximizes F-beta Score.
+    beta < 1 favors Precision (e.g. 0.5).
+    beta > 1 favors Recall (e.g. 2.0).
+    Default beta=0.5 prioritizes avoiding False Positives (wasting money).
     """
-    print(f"[*] Training Base LightGBM... Data shape: {X_train.shape}")
-    base_model = LGBMClassifier(**params)
-    base_model.fit(X_train, y_train)
+    print(f"[*] Optimizing Decision Threshold (Metric: F{beta}-Score)...")
+    thresholds = np.arange(0.3, 0.8, 0.01)
+    scores = []
+    precisions = []
+    recalls = []
     
-    print("[*] Calibrating Probabilities (Isotonic Regression, CV=5)...")
-    # CalibratedClassifierCV con CV allena internamente 5 modelli su fold diversi
-    calibrated_model = CalibratedClassifierCV(base_model, method='isotonic', cv=5)
+    for thresh in thresholds:
+        y_pred = (y_proba >= thresh).astype(int)
+        score = fbeta_score(y_true, y_pred, beta=beta)
+        scores.append(score)
+        precisions.append(precision_score(y_true, y_pred, zero_division=0))
+        recalls.append(recall_score(y_true, y_pred, zero_division=0))
+        
+    best_idx = np.argmax(scores)
+    best_thresh = thresholds[best_idx]
+    best_score = scores[best_idx]
+    
+    print(f"    [+] Best Threshold: {best_thresh:.2f}")
+    print(f"        -> F{beta}-Score: {best_score:.4f}")
+    print(f"        -> Precision: {precisions[best_idx]:.4f}")
+    print(f"        -> Recall:    {recalls[best_idx]:.4f}")
+    return best_thresh
+
+def train_ensemble(X_train, y_train, lgbm_params):
+    """
+    Trains an Ensemble of LightGBM and XGBoost.
+    Returns the Calibrated VotingClassifier.
+    """
+    print(f"[*] Training Ensemble (LGBM + XGB)... Data shape: {X_train.shape}")
+    
+    # 1. Define Base Models
+    lgbm_clf = LGBMClassifier(**lgbm_params)
+    xgb_clf = XGBClassifier(**config.XGB_DEFAULT_PARAMS)
+    
+    # 2. Voting Classifier
+    voting_clf = VotingClassifier(
+        estimators=[('lgbm', lgbm_clf), ('xgb', xgb_clf)],
+        voting='soft'
+    )
+    
+    # 3. Fit
+    voting_clf.fit(X_train, y_train)
+    
+    # 4. Calibrate
+    print("[*] Calibrating Ensemble (Isotonic)...")
+    calibrated_model = CalibratedClassifierCV(voting_clf, method='isotonic', cv=5)
     calibrated_model.fit(X_train, y_train)
     
-    print("[+] Training & Calibration complete.")
-    return calibrated_model, base_model
+    print("[+] Ensemble Training & Calibration complete.")
+    return calibrated_model, voting_clf
 
-def evaluate(model, X_test, y_test):
-    print(f"[*] Evaluating with Decision Threshold: {config.DECISION_THRESHOLD:.2f}")
+def evaluate(model, X_test, y_test, threshold=0.5):
+    print(f"[*] Evaluating with Decision Threshold: {threshold:.2f}")
     
     # 1. Probabilità calibrate
     y_proba = model.predict_proba(X_test)[:, 1]
     
     # 2. Applicazione Threshold custom
-    y_pred = (y_proba >= config.DECISION_THRESHOLD).astype(int)
+    y_pred = (y_proba >= threshold).astype(int)
 
     metrics = {
         'accuracy': accuracy_score(y_test, y_pred),
@@ -92,49 +136,54 @@ def evaluate(model, X_test, y_test):
     for name, value in metrics.items():
         print(f"  [+] {name.upper()}: {value:.4f}")
 
-    print(f"\n--- CLASSIFICATION REPORT (Threshold {config.DECISION_THRESHOLD}) ---\n")
+    print(f"\n--- CLASSIFICATION REPORT (Threshold {threshold:.2f}) ---\n")
     print(classification_report(y_test, y_pred, target_names=['Failed (0)', 'Successful (1)']))
     return metrics, y_pred, y_proba
 
-def analyze_shap(base_model, X_train, X_test):
-    """Calcola e salva i grafici SHAP usando il modello base."""
-    print("[*] Generating SHAP Analysis...")
-    try:
-        # Usa TreeExplainer per LightGBM (molto veloce)
-        explainer = shap.TreeExplainer(base_model)
-        
-        # Calcola shap values su un campione del test set per velocità
-        sample_size = min(2000, len(X_test))
-        X_sample = X_test.sample(sample_size, random_state=42)
-        
-        # Suppress specific SHAP warning for LightGBM
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message=".*LightGBM binary classifier.*")
-            shap_values = explainer.shap_values(X_sample)
-        
-        # LightGBM binary output a volte è lista, a volte array. Gestiamo entrambi.
-        if isinstance(shap_values, list):
-            # print(f"    [Debug] SHAP output is list of len {len(shap_values)}, selecting class 1")
-            shap_values = shap_values[1] # Classe 1 (Success)
+def analyze_shap(voting_model, X_train, X_test):
+    """Calcola e salva i grafici SHAP per ogni modello nell'Ensemble."""
+    print("[*] Generating SHAP Analysis for Ensemble...")
+    
+    # Campione per velocità 
+    sample_size = min(2000, len(X_test))
+    X_sample = X_test.sample(sample_size, random_state=42)
+    
+    # Fix: Use zip to pair names from .estimators with fitted models from .estimators_
+    for (name, _), model in zip(voting_model.estimators, voting_model.estimators_):
+        print(f"    [*] Analyzing SHAP for: {name}...")
+        try:
+            # SHAP Explainer
+            explainer = shap.TreeExplainer(model)
             
-        # Summary Plot
-        plt.figure(figsize=(10, 8))
-        shap.summary_plot(shap_values, X_sample, show=False)
-        plt.title(f'SHAP Summary Plot (Top Features)', fontsize=14)
-        plt.tight_layout()
-        plt.savefig(os.path.join(config.RESULTS_DIR, 'shap_summary_final.png'), dpi=150)
-        plt.close()
-        print(f"[+] SHAP plots saved to {config.RESULTS_DIR}")
-        
-    except Exception as e:
-        print(f"⚠️ SHAP Analysis failed: {e}")
+            # Suppress specific warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*LightGBM binary classifier.*")
+                shap_values = explainer.shap_values(X_sample)
+
+            # Gestione output SHAP (lista vs array)
+            if isinstance(shap_values, list):
+                shap_values = shap_values[1] # Classe 1
+            
+            # Summary Plot
+            plt.figure(figsize=(10, 8))
+            shap.summary_plot(shap_values, X_sample, show=False)
+            plt.title(f'SHAP Summary Plot - {name}', fontsize=14)
+            plt.tight_layout()
+            
+            save_path = os.path.join(config.RESULTS_DIR, f'shap_summary_{name}.png')
+            plt.savefig(save_path, dpi=150)
+            plt.close()
+            print(f"        [+] Saved: {save_path}")
+            
+        except Exception as e:
+            print(f"        ⚠️ SHAP failed for {name}: {e}")
 
 def save_plots(calib_model, base_model, X_train, y_test, y_pred, y_proba):
     # Confusion Matrix
     fig, ax = plt.subplots(figsize=(7, 6))
     cm = confusion_matrix(y_test, y_pred)
     ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Failed', 'Successful']).plot(cmap='Blues', ax=ax, values_format='d')
-    ax.set_title(f'Confusion Matrix (Threshold {config.DECISION_THRESHOLD})', fontsize=13)
+    ax.set_title(f'Confusion Matrix', fontsize=13)
     plt.tight_layout()
     plt.savefig(os.path.join(config.RESULTS_DIR, 'confusion_matrix_final.png'), dpi=150)
     plt.close()
@@ -166,15 +215,21 @@ def save_plots(calib_model, base_model, X_train, y_test, y_pred, y_proba):
     plt.savefig(os.path.join(config.RESULTS_DIR, 'calibration_curve.png'), dpi=150)
     plt.close()
 
-    # Feature Importance (dal modello BASE, non calibrato)
-    importances = base_model.feature_importances_
-    fi_df = pd.DataFrame({'feature': X_train.columns, 'importance': importances}).sort_values(by='importance', ascending=False).head(20)
-    fig, ax = plt.subplots(figsize=(10, 8))
-    sns.barplot(x='importance', y='feature', hue='feature', data=fi_df, palette='viridis', ax=ax, legend=False)
-    ax.set_title('Feature Importance (Top 20 - Base Model)', fontsize=13)
-    plt.tight_layout()
-    plt.savefig(os.path.join(config.RESULTS_DIR, 'feature_importance_final.png'), dpi=150)
-    plt.close()
+    # Feature Importance (LGBM)
+    try:
+        lgbm_model = base_model.estimators_[0]
+        importances = lgbm_model.feature_importances_
+        fi_df = pd.DataFrame({'feature': X_train.columns, 'importance': importances}).sort_values(by='importance', ascending=False).head(20)
+        fig, ax = plt.subplots(figsize=(10, 8))
+        sns.barplot(x='importance', y='feature', hue='feature', data=fi_df, palette='viridis', ax=ax, legend=False)
+        ax.set_title('Feature Importance (Top 20 - LGBM)', fontsize=13)
+        plt.tight_layout()
+        plt.savefig(os.path.join(config.RESULTS_DIR, 'feature_importance_final.png'), dpi=150)
+        plt.close()
+    except Exception as e:
+        print(f"⚠️ Feature Importance failed for LGBM: {e}")
+    
+    
 
 # ──────────────────────────────────────────────
 #  MAIN
@@ -188,23 +243,36 @@ def main():
         # 1. Load Data
         X_train, y_train, X_test, y_test = load_data()
         
-        # 2. Train (Calibrated) & Base
+        # 2. Train Ensemble
         params = get_model_params()
-        calibrated_model, base_model = train(X_train, y_train, params)
+        calibrated_model, base_voting_model = train_ensemble(X_train, y_train, params)
         
-        # 3. Evaluate (with Threshold)
-        metrics, y_pred, y_proba = evaluate(calibrated_model, X_test, y_test)
+        # 3. Find Best Threshold (CROSS-VALIDATION)
+        # We generate "clean" predictions on training data to optimize threshold without overfitting.
+        print("[*] Generating CV predictions for threshold optimization...")
+        y_cv_proba = cross_val_predict(
+            calibrated_model, 
+            X_train, 
+            y_train, 
+            cv=5, 
+            method='predict_proba', 
+            n_jobs=-1
+        )[:, 1]
         
-        # 4. Save Model (Saving the CALIBRATED one for inference)
+        best_threshold = optimize_threshold(y_train, y_cv_proba, beta=0.7) # Optimize for F0.7 (Milder Precision focus)     
+        # Evaluate on Test Set
+        metrics, y_pred, y_proba = evaluate(calibrated_model, X_test, y_test, threshold=best_threshold)
+        
+        # 4. Save Model
         joblib.dump(calibrated_model, config.MODEL_PATH)
-        print(f"\n[+] Calibrated Model saved: {config.MODEL_PATH}")
+        print(f"\n[+] Calibrated Ensemble Model saved: {config.MODEL_PATH}")
         
         # 5. Save Results & Plots
         pd.DataFrame([metrics]).to_csv(os.path.join(config.RESULTS_DIR, 'metrics_final.csv'), index=False)
-        save_plots(calibrated_model, base_model, X_train, y_test, y_pred, y_proba)
+        save_plots(calibrated_model, base_voting_model, X_train, y_test, y_pred, y_proba)
         
-        # 6. SHAP Analysis (on Base Model)
-        analyze_shap(base_model, X_train, X_test)
+        # 6. SHAP Analysis (Ensemble)
+        # analyze_shap(base_voting_model, X_train, X_test)
         
         # Save feature columns
         joblib.dump(X_train.columns.tolist(), os.path.join(config.ARTIFACTS_DIR, 'model_features.joblib'))

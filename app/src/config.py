@@ -43,22 +43,34 @@ LEAKAGE_COLS = [
     'current_currency'
 ]
 
+# Redundant columns to drop (feature selection)
+REDUNDANT_COLS = ['preparation_days', 'launch_hour', 'has_question', 'currency']
+
+
 # Columns for Imputation
 NUM_COLS_IMPUTE = [
     'duration_days', 'preparation_days_log', 'name_len', 'blurb_len', 'goal_usd_log',
     'launch_month_sin', 'launch_month_cos', 'launch_day_sin', 'launch_day_cos', 
-    'goal_to_cat_diff', 'has_video'
+    'goal_to_cat_diff', 'has_video', 'goal_per_day',
+    'name_word_count', 'blurb_word_count', 'is_weekend', 'name_is_upper',
+    'sentiment_polarity', 'sentiment_subjectivity', 'readability_score'
 ]
 
-CAT_COLS_IMPUTE = ['country', 'main_category', 'currency']
+CAT_COLS_IMPUTE = ['country', 'main_category']
 
 # Columns for One-Hot Encoding
-ONE_HOT_COLS = ['country', 'currency', 'main_category']
+ONE_HOT_COLS = ['country', 'main_category']
+
+# ──────────────────────────────────────────────
+#  NLP CONFIG
+# ──────────────────────────────────────────────
+NLP_MODEL_NAME = 'all-MiniLM-L6-v2'
+PCA_COMPONENTS = 30  # Reduce 384 dims to 30
 
 # ──────────────────────────────────────────────
 #  MODEL PARAMETERS (DEFAULTS)
 # ──────────────────────────────────────────────
-MAX_TEXT_FEATURES = 150
+MAX_TEXT_FEATURES = 100 # Reduced since we use embeddings now
 DECISION_THRESHOLD = 0.60
 
 LGBM_DEFAULT_PARAMS = {
@@ -69,4 +81,15 @@ LGBM_DEFAULT_PARAMS = {
     'random_state': 42,
     'n_jobs': -1,
     'verbose': -1
+}
+
+XGB_DEFAULT_PARAMS = {
+    'n_estimators': 500,
+    'learning_rate': 0.05,
+    'max_depth': 6,
+    'subsample': 0.8,
+    'colsample_bytree': 0.8,
+    'random_state': 42,
+    'n_jobs': -1,
+    'eval_metric': 'logloss'
 }
