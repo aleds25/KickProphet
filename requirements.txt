@@ -12,3 +12,4 @@ pytest
 sentence-transformers
 textblob
 textstat
+flask

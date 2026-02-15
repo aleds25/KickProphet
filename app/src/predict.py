@@ -31,10 +31,10 @@ def get_latest_usd_rates():
             # The API returns rates relative to USD (e.g. USD -> EUR = 0.92)
             # We need the inverse (Value in USD) e.g. 1 EUR = 1.08 USD
             rates_to_usd = {k: 1/v for k, v in data['rates'].items() if v > 0}
-            print(f"[*] ✅ Currency API Success. Rates Updated: {data.get('date')}")
+            print(f"[*] Currency API Success. Rates Updated: {data.get('date')}")
             return rates_to_usd, "LIVE"
     except Exception as e:
-        print(f"[!] ⚠️ Currency API Failed ({e}). Using Backup Static Rates.")
+        print(f"[!] Currency API Failed ({e}). Using Backup Static Rates.")
     
     return STATIC_FX_RATES, "STATIC"
 
@@ -150,15 +150,22 @@ def prepare_single_sample(data, artifacts):
     val = sub_cat_map.get(df['sub_category'].iloc[0], global_mean)
     df['sub_cat_encoded'] = val
     
-    # Cyclical Time (Mocking launched_at as current time if not provided, or just 0)
-    # Ideally inference provides launch date. If not, assume "now".
-    # Ideally inference provides launch date. If not, assume "now".
-    now = datetime.now()
-    df['launch_month_sin'] = np.sin(2 * np.pi * now.month / 12)
-    df['launch_month_cos'] = np.cos(2 * np.pi * now.month / 12)
-    df['launch_day_sin'] = np.sin(2 * np.pi * now.weekday() / 7)
-    df['launch_day_cos'] = np.cos(2 * np.pi * now.weekday() / 7)
-    df['is_weekend'] = 1 if now.weekday() >= 5 else 0
+    # Cyclical Time (Use provided launch_date or default to now)
+    launch_date_str = data.get('launch_date')
+    if launch_date_str:
+        try:
+            launch_dt = datetime.strptime(launch_date_str, '%Y-%m-%d')
+        except ValueError:
+            print(f"[!] Invalid date format {launch_date_str}, using current time.")
+            launch_dt = datetime.now()
+    else:
+        launch_dt = datetime.now()
+
+    df['launch_month_sin'] = np.sin(2 * np.pi * launch_dt.month / 12)
+    df['launch_month_cos'] = np.cos(2 * np.pi * launch_dt.month / 12)
+    df['launch_day_sin'] = np.sin(2 * np.pi * launch_dt.weekday() / 7)
+    df['launch_day_cos'] = np.cos(2 * np.pi * launch_dt.weekday() / 7)
+    df['is_weekend'] = 1 if launch_dt.weekday() >= 5 else 0
     
     # Missing Cols (One Hot, etc)
     for col in artifacts['features']:

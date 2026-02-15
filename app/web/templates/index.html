@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KickProphet | Campaign Success Predictor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="background-glob"></div>
+    <div class="container">
+        <header>
+            <div class="logo">KickProphet</div>
+            <h1>Predict Your Campaign's Destiny</h1>
+            <p class="subtitle">AI-powered analytics to forecast Kickstarter success probability.</p>
+        </header>
+
+        <main>
+            <form id="prediction-form">
+                <div class="form-grid">
+                    <!-- Project Basics -->
+                    <div class="form-group full-width">
+                        <label for="name">Project Name</label>
+                        <input type="text" id="name" name="name" placeholder="e.g. The Ultimate Smart Coffee Maker"
+                            required>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label for="blurb">Short Description (Blurb)</label>
+                        <textarea id="blurb" name="blurb" rows="3"
+                            placeholder="Describe your project in a catchy way..." required></textarea>
+                    </div>
+
+                    <!-- Financials & Time -->
+                    <div class="form-group">
+                        <label for="goal">Funding Goal</label>
+                        <div class="input-with-icon">
+                            <span class="currency-symbol">$</span>
+                            <input type="number" id="goal" name="goal" placeholder="50000" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="currency">Currency</label>
+                        <select id="currency" name="currency">
+                            <option value="USD" selected>USD ($)</option>
+                            <option value="EUR">EUR (€)</option>
+                            <option value="GBP">GBP (£)</option>
+                            <option value="CAD">CAD ($)</option>
+                            <option value="AUD">AUD ($)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="duration_days">Duration (Days)</label>
+                        <input type="number" id="duration_days" name="duration_days" placeholder="30" value="30"
+                            required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="launch_date">Planned Launch Date</label>
+                        <input type="date" id="launch_date" name="launch_date" required>
+                    </div>
+
+                    <div class="form-group"
+                        style="grid-column: span 2; display: flex; align-items: center; justify-content: space-between; background: var(--input-bg); padding: 10px 16px; border-radius: 12px; border: 1px solid var(--input-border);">
+                        <label for="has_video" style="margin: 0; color: var(--text-primary); cursor: pointer;">Does the
+                            project have a video?</label>
+                        <label class="switch">
+                            <input type="checkbox" id="has_video" name="has_video">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="country">Country</label>
+                        <select id="country" name="country">
+                            <option value="US" selected>United States</option>
+                            <option value="GB">United Kingdom</option>
+                            <option value="CA">Canada</option>
+                            <option value="AU">Australia</option>
+                            <option value="DE">Germany</option>
+                            <option value="FR">France</option>
+                            <option value="IT">Italy</option>
+                            <option value="ES">Spain</option>
+                        </select>
+                    </div>
+
+                    <!-- Categorization -->
+                    <div class="form-group">
+                        <label for="category">Category</label>
+                        <select id="category" name="category" required>
+                            <option value="" disabled selected>Select Category</option>
+                            <option value="Technology">Technology</option>
+                            <option value="Games">Games</option>
+                            <option value="Design">Design</option>
+                            <option value="Film & Video">Film & Video</option>
+                            <option value="Music">Music</option>
+                            <option value="Publishing">Publishing</option>
+                            <option value="Fashion">Fashion</option>
+                            <option value="Food">Food</option>
+                            <option value="Art">Art</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="sub_category">Sub-Category</label>
+                        <input type="text" id="sub_category" name="sub_category" placeholder="e.g. Tabletop Games"
+                            required>
+                    </div>
+                </div>
+
+                <button type="submit" id="predict-btn">
+                    <span class="btn-text">Generate Prediction</span>
+                    <span class="loader"></span>
+                </button>
+            </form>
+
+            <div id="result-card" class="hidden">
+                <div class="result-header">
+                    <h2>Analysis Complete</h2>
+                    <span class="close-btn">&times;</span>
+                </div>
+                <div class="result-body">
+                    <div class="probability-ring">
+                        <svg viewBox="0 0 36 36" class="circular-chart">
+                            <path class="circle-bg"
+                                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            <path class="circle" stroke-dasharray="0, 100"
+                                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            <text x="18" y="20.35" class="percentage">0%</text>
+                        </svg>
+                    </div>
+                    <div class="prediction-details">
+                        <h3 id="prediction-status">Loading...</h3>
+                        <p id="prediction-message">Based on your project parameters, our model predicts this outcome.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+
+</html>
