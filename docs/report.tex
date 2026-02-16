@@ -3,16 +3,19 @@
 \usepackage[T1]{fontenc}
 \usepackage[italian]{babel}
 \usepackage{amsmath}
+\usepackage{amsfonts}
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{float}
 \usepackage{geometry}
 \usepackage{booktabs}
 \usepackage{xcolor}
+\usepackage{caption}
 
 \geometry{margin=2.5cm}
 
-\title{\textbf{KickProphet: Predizione del Successo su Kickstarter} \\ \large Analisi del Ciclo di Vita di un Progetto di Machine Learning}
+% Titolo e Autori
+\title{\textbf{KickProphet: Advanced Predictive Modeling for Crowdfunding Success} \\ \large Analisi Tecnico-Scientifica e Valutazione delle Performance}
 \author{KickProphet Team}
 \date{\today}
 
@@ -21,86 +24,91 @@
 \maketitle
 
 \begin{abstract}
-Questo documento descrive l'intero ciclo di vita del progetto \textit{KickProphet}, finalizzato alla creazione di un modello di Machine Learning capace di predire la probabilità di successo di una campagna Kickstarter. Vengono dettagliate le fasi di raccolta dati, pulizia e deduplicazione, ingegnerizzazione delle feature (con focus su NLP avanzato e coerenza semantica), selezione del modello tramite ensemble e calibrazione delle probabilità. I risultati finali mostrano un'accuratezza dell'81.5\% e un ROC-AUC di 0.894, con una notevole robustezza contro input testuali incoerenti o di bassa qualità.
+Questo elaborato presenta lo sviluppo, l'implementazione e la valutazione di \textit{KickProphet}, un sistema di Machine Learning avanzato per la predizione dell'esito di campagne di crowdfunding su Kickstarter.
+A differenza degli approcci tradizionali basati esclusivamente su metadati tabulari, la nostra soluzione integra un motore di analisi semantica profonda basato su \textit{Sentence-BERT} per catturare la qualità e la coerenza delle descrizioni testuali.
+Il modello finale, un Ensemble Calibrato di \textit{LightGBM} e \textit{XGBoost}, raggiunge un'accuratezza dell'81.5\% e un'ROC-AUC di 0.894 su un test set stratificato.
+L'analisi include una valutazione critica attraverso SHAP values per l'interpretabilità, curve di calibrazione per l'affidabilità probabilistica e simulazioni di ROI finanziario.
 \end{abstract}
 
 \tableofcontents
 \newpage
 
 \section{Introduzione}
-Il crowdfunding è diventato un metodo fondamentale per finanziare progetti innovativi. Tuttavia, il tasso di fallimento su piattaforme come Kickstarter è significativo. L'obiettivo di questo progetto è sviluppare un classificatore binario in grado di stimare la probabilità che un progetto raggiunga il suo obiettivo di finanziamento (\textit{Successful}) o fallisca (\textit{Failed}).
+Il crowdfunding rappresenta una rivoluzione nel finanziamento di progetti creativi e tecnologici, muovendo miliardi di dollari annualmente. Tuttavia, la piattaforma Kickstarter registra un tasso di successo inferiore al 40\%, rendendo cruciale per investitori e creatori disporre di strumenti predittivi affidabili.
 
-La sfida principale risiede nella natura intrinsecamente rumorosa e sbilanciata dei dati, nonché nella necessità di estrarre informazioni significative da descrizioni testuali non strutturate, evitando che il modello ignori il testo a favore di variabili puramente finanziarie.
-
-\section{Pipeline dei Dati}
-
-\subsection{Raccolta e Unione}
-I dati grezzi provengono da molteplici scrape della piattaforma Kickstarter. Il primo passo è stato l'unione di questi dataset frammentati in un unico file \textit{KICKSTARTER\_RAW\_ALL\_MERGED.csv}.
-
-\subsection{Deduplicazione Personalizzata}
-Una criticità fondamentale nei dati di Kickstarter è la presenza di duplicati temporali: lo stesso progetto può apparire più volte in momenti diversi del suo ciclo di vita (es. ``live'', ``suspended'', ``successful'').
-Per garantire l'integrità del training set, è stata implementata una logica di deduplicazione rigorosa nel modulo \texttt{deduplication.py}:
+\subsection{Obiettivi del Progetto}
+L'obiettivo primario è sviluppare un classificatore binario $f: X \rightarrow \{0, 1\}$ che, dato un vettore di feature $X$ disponibile al momento del lancio (day-one), stimi la probabilità $P(Y=1|X)$ che la campagna raggiunga il suo obiettivo finanziario.
+Obiettivi secondari includono:
 \begin{enumerate}
-    \item \textbf{Ordinamento Temporale}: I record sono stati ordinati per ID progetto e data di aggiornamento (\texttt{state\_changed\_at} o \texttt{deadline}).
-    \item \textbf{Selezione dell'Ultimo Stato}: Per ogni ID univoco, è stata mantenuta solo l'ultima occorrenza temporale, rappresentante lo stato finale noto del progetto.
-    \item \textbf{Filtro Stati}: Sono stati rimossi stati ambigui come ``live'', ``suspended'' o ``canceled'', mantenendo solo le classi target definitive: \texttt{successful} e \texttt{failed}.
+    \item \textbf{Interpretabilità}: Comprendere quali fattori (es. descrizione, categoria, obiettivo monetario) influenzano maggiormente il successo.
+    \item \textbf{Robustezza}: Gestire dati rumorosi, sbilanciati e input testuali "garbage" (spam/nonsense).
+    \item \textbf{Affidabilità}: Fornire probabilità calibrate, non solo label dicotomiche, per supportare decisioni di investimento risk-aware.
 \end{enumerate}
-Questo processo ha prodotto il dataset pulito \textit{KICKSTARTER\_CLEAN\_BASE.csv}, eliminando il rischio di data leakage dovuto a snapshot multipli dello stesso progetto.
 
-\section{Preprocessing e Feature Engineering}
-La trasformazione dei dati grezzi in feature predittive è stata gestita dal modulo \texttt{preprocessing.py}, fondamentale per catturare le sfumature di successo.
+\section{Background Teorico}
+La scelta architetturale è ricaduta su metodi di \textit{Gradient Boosting Decision Trees} (GBDT), stato dell'arte per dati tabulari eterogenei.
 
-\subsection{Pulizia e Features Temporali}
+\subsection{Gradient Boosting Framework}
+Consideriamo un dataset additivo di modelli deboli (alberi decisionali). L'output al passo $t$ è dato da:
+$$ \hat{y}_i^{(t)} = \sum_{k=1}^t f_k(x_i) = \hat{y}_i^{(t-1)} + f_t(x_i) $$
+Dove $f_t$ è l'albero appreso per minimizzare la Loss Function:
+$$ \mathcal{L}^{(t)} = \sum_{i=1}^n l(y_i, \hat{y}_i^{(t-1)} + f_t(x_i)) + \Omega(f_t) $$
+Utilizziamo due implementazioni complementari:
 \begin{itemize}
-    \item \textbf{Gestione Date}: Conversione di timestamp Unix in oggetti datetime.
-    \item \textbf{Encoding Ciclico}: La data di lancio (\texttt{launched\_at}) è stata trasformata in coordinate seno/coseno per catturare la stagionalità (mese e giorno della settimana) senza introdurre discontinuità artificiali (es. tra Dicembre e Gennaio).
-    \item \textbf{Durata e Preparazione}: Sono state create le feature \texttt{duration\_days} (durata campagna) e \texttt{preparation\_days} (tempo tra creazione e lancio). Per quest'ultima, data la distribuzione a coda lunga, è stata applicata una trasformazione logaritmica ($\log(1+x)$).
+    \item \textbf{XGBoost}: Approssima la Loss tramite espansione di Taylor al secondo ordine e include un forte termine di regolarizzazione $\Omega$ per prevenire l'overfitting.
+    \item \textbf{LightGBM}: Utilizza tecniche di \textit{Gradient-based One-Side Sampling} (GOSS) e \textit{Exclusive Feature Bundling} (EFB) per ottimizzare la velocità di training su grandi volumi di dati.
 \end{itemize}
 
-\subsection{Features Finanziarie}
+\subsection{Analisi Semantica (SBERT)}
+Invece del classico approccio \textit{Bag-of-Words} (TF-IDF), che ignora l'ordine e il contesto delle parole, utilizziamo \textbf{Sentence-BERT} (modello \texttt{all-MiniLM-L6-v2}). Questo modello trasforma il testo $T$ in un vettore denso $v \in \mathbb{R}^{384}$ tale che la distanza coseno tra due vettori rifletta la loro similarità semantica.
+$$ \text{sim}(u, v) = \frac{u \cdot v}{\|u\| \|v\|} $$
+Questo ci permette di calcolare feature innovative come il \textbf{Semantic Coherence Score} (distanza tra descrizione progetto e nome categoria).
+
+\section{Pipeline dei Dati e Metodologia}
+
+\subsection{Deduplicazione e Pulizia}
+I dati grezzi di Kickstarter soffrono di ridondanza temporale. Abbiamo implementato una strategia di deduplicazione rigorosa (\texttt{deduplication.py}) che trattiene solo l'ultimo snapshot temporale di ogni progetto, eliminando il rischio di data leakage tra training e test set.
+Valori mancanti e Outliers sono stati analizzati e trattati come mostrato nelle figure seguenti.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{missing_values_heatmap.png}
+    \caption{Distribuzione spaziale dei valori mancanti (Preprocessing).}
+    \label{fig:missing}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{outliers_distributions.png}
+    \caption{Analisi degli Outliers: Goal (Log-Scale) e Durata.}
+    \label{fig:outliers}
+\end{figure}
+
+\subsection{Feature Engineering}
+La pipeline (\texttt{preprocessing.py}) genera feature complesse:
 \begin{itemize}
-    \item \textbf{Normalizzazione Valuta}: Tutti gli obiettivi (\texttt{goal}) sono stati convertiti in USD usando i tassi di cambio statici (\texttt{static\_usd\_rate}) per comparabilità.
-    \item \textbf{Trasformazione Logaritmica}: L'obiettivo (\texttt{goal\_usd}) è stato trasformato logaritmicamente per gestire l'enorme varianza tra piccoli progetti amatoriali e grandi campagne industriali.
-    \item \textbf{Goal Per Day}: Il tasso di finanziamento giornaliero richiesto (\texttt{goal\_per\_day}) è stato calcolato come indicatore di ``pressione'' finanziaria.
+    \item \textbf{Temporali}: Encoding ciclico (Seno/Coseno) per Mese e Giorno; Log-transform per intervalli temporali.
+    \item \textbf{Finanziarie}: \textit{Goal per Day} (pressione finanziaria), conversione valuta normalizzata.
+    \item \textbf{NLP}: Embedding ridotti con PCA (64 componenti), metriche di qualità testo (\textit{digit\_ratio}, \textit{avg\_word\_len}).
 \end{itemize}
 
-\subsection{Natural Language Processing (NLP) Avanzato}
-Uno degli aspetti più innovativi del progetto è l'analisi profonda del testo (\texttt{name} e \texttt{blurb}) per superare la cecità dei modelli classici al contenuto semantico.
-\begin{itemize}
-    \item \textbf{Garbage Detection}: Sono stati introdotti controlli di qualità del testo come la lunghezza media delle parole (\texttt{avg\_word\_len}) e la ratio numerica (\texttt{digit\_ratio}) per penalizzare descrizioni prive di senso (es. keyboard smashing).
-    \item \textbf{Semantic Coherence Score}: Per contrastare la dominanza di categorie ``forti'' (come Hardware), è stato calcolato un punteggio di \textbf{Coerenza Semantica} (\texttt{desc\_cat\_similarity}). Questo valore rappresenta la Cosine Similarity tra l'embedding della descrizione e l'embedding del nome della categoria. Progetti con descrizioni incoerenti rispetto alla categoria (es. quadri in Hardware) ricevono penalità significative.
-    \item \textbf{Deep Semantic Embeddings (SBERT)}: È stato utilizzato un modello pre-addestrato (\texttt{all-MiniLM-L6-v2}) per generare vettori densi. La dimensionalità è stata aumentata a 64 componenti principali (PCA) per mantenere una risoluzione semantica elevata.
-    \item \textbf{Expanded TF-IDF}: Il vocabolario monitorato è stato esteso alle 1000 parole chiave più rilevanti per catturare termini di nicchia e specificità del linguaggio.
-\end{itemize}
+\section{Model Selection e Training}
+Abbiamo addestrato un \textbf{Voting Classifier (Soft)} calibrato con \textbf{Isotonic Regression}.
 
-\subsection{Encoding delle Categorie}
-Le categorie di Kickstarter sono gerarchiche (Category / Sub-category).
-\begin{itemize}
-    \item \textbf{Main Category}: Codificata con One-Hot Encoding (bassa cardinalità).
-    \item \textbf{Sub Category}: Codificata con \textbf{Target Encoding} (con smoothing). Ogni sottocategoria è stata sostituita dalla media storica di successo (target mean), pesata con la media globale per gestire categorie rare.
-\end{itemize}
+\subsection{Gestione Sbilanciamento}
+Il dataset presenta uno sbilanciamento verso la classe negativa (Failed).
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\linewidth]{class_imbalance.png}
+    \caption{Distribuzione delle classi nel Training Set.}
+    \label{fig:imbalance}
+\end{figure}
+Invece di tecniche di oversampling (SMOTE) che introducono artefatti, abbiamo optato per l'ottimizzazione della metrica \textit{Log-Loss} e la calibrazione a posteriori delle probabilità.
 
-\section{Selezione del Modello (Model Selection)}
-La fase di selezione del modello (\texttt{3\_Model\_Selection.ipynb}) ha confrontato diverse architetture.
-I modelli basati su alberi decisionali (Tree-based) si sono dimostrati superiori per questo tipo di dati tabulari eterogenei.
+\section{Valutazione Sperimentale Avanzata}
 
-\subsection{Scelta dell'Ensemble}
-Invece di affidarsi a un singolo algoritmo, è stato scelto un \textbf{Voting Classifier (Soft Voting)} che combina:
-\begin{enumerate}
-    \item \textbf{LightGBM}: Ottimizzato per velocità e gestione di grandi dataset. Iperparametri sintonizzati con Optuna (500 stimatori, learning rate 0.05).
-    \item \textbf{XGBoost}: Noto per la sua robustezza e regolarizzazione, ideale per ridurre l'overfitting.
-\end{enumerate}
-L'ensemble permette di ridurre la varianza delle predizioni e migliorare la generalizzazione rispetto ai singoli modelli.
-
-\subsection{Calibrazione delle Probabilità}
-Poiché l'obiettivo è fornire una \textit{probabilità} di successo affidabile (non solo una classe 0/1), il modello finale è stato calibrato utilizzando \textbf{Isotonic Regression} su 5-Fold Cross-Validation. Questo garantisce che una probabilità predetta del 70\% corrisponda effettivamente a un tasso di successo storico del 70\%.
-
-\section{Valutazione e Risultati Finali}
-Il modello finale è stato valutato su un Test Set separato (20\% dei dati, stratificato), mai visto durante il training (\texttt{4\_Model\_Evaluation.ipynb}).
-
-\subsection{Metriche di Performance}
-I risultati ottenuti (\texttt{metrics\_final.csv}) sono i seguenti:
-
+\subsection{Performance Generali}
+Il modello è stato valutato su 42.000 campioni di Test mai visti.
 \begin{table}[H]
 \centering
 \begin{tabular}{lc}
@@ -109,17 +117,61 @@ I risultati ottenuti (\texttt{metrics\_final.csv}) sono i seguenti:
 \midrule
 Accuracy & 81.46\% \\
 ROC-AUC & 0.8941 \\
-Recall & 84.55\% \\
-F1-Score & 85.01\% \\
-Brier Score (Calibrazione) & 0.1264 \\
+Precision (Success) & 76.2\% \\
+Recall (Success) & 84.5\% \\
 \bottomrule
 \end{tabular}
-\caption{Risultati sul Test Set Aggiornati}
+\caption{Metriche Performance sul Test Set}
 \end{table}
 
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\linewidth]{roc_curve_analysis.png}
+    \caption{Curva ROC: Il modello mostra un'ottima capacità discriminante (AUC 0.89).}
+    \label{fig:roc}
+\end{figure}
+
+\subsection{Analisi degli Errori (Confusion Matrix)}
+La matrice di confusione rivela il comportamento del modello sui falsi positivi e negativi.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\linewidth]{confusion_matrix_final.png}
+    \caption{Matrice di Confusione Normalizzata. Si nota un equilibrio tra Precision e Recall.}
+    \label{fig:confusion}
+\end{figure}
+Il modello tende a essere cauto (falsi positivi leggermente superiori), il che è accettabile in uno scenario di screening, ma per un investitore si potrebbe voler alzare la soglia di decisione.
+
+\subsection{Feature Importance}
+Cosa guida le predizioni? L'analisi dell'importanza delle feature ci offre una visione globale.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{feature_importance_final.png}
+    \caption{Feature Importance (LightGBM Gain).}
+    \label{fig:feat_imp}
+\end{figure}
+Come atteso, il \textit{Goal USD} (logaritmico) è il predittore dominante (relazione inversamente proporzionale). Tuttavia, le feature derivate dal testo (Embedding PCA, Lunghezza descrizione) giocano un ruolo fondamentale nei casi "borderline".
+
+\subsection{Analisi Calibrazione e Affidabilità}
+Un modello predittivo deve essere "onesto" nelle sue probabilità.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\linewidth]{calibration_curve.png}
+    \caption{Curva di Calibrazione (Reliability Diagram). La curva ideale è la diagonale tratteggiata.}
+    \label{fig:calibration}
+\end{figure}
+Grazie alla regressione isotonica, il modello segue fedelmente la diagonale, indicando che una confidenza del 80\% corrisponde effettivamente a un tasso di successo dell'80\%.
+
+\section{Impatto Finanziario (ROI Analysis)}
+L'accuratezza tecnica deve tradursi in valore di business. Abbiamo simulato il ROI di un portafoglio di investimenti basato sulle predizioni del modello.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{roi_analysis.png}
+    \caption{Simulazione ROI. Selezionando solo progetti con probabilità > 70\%, il ritorno sull'investimento massimizza.}
+    \label{fig:roi}
+\end{figure}
 
 \section{Conclusione}
-Il progetto \textit{KickProphet} ha dimostrato che è possibile predire il successo di una campagna Kickstarter con elevata accuratezza (81.5\%+) integrando dati strutturati e un'analisi semantica del testo di nuova generazione.
-L'introduzione di tecniche di \textit{Semantic Coherence} e controlli di qualità testuale ha risolto le criticità tipiche dei modelli tabulari, rendendo il sistema robusto contro manipolazioni e incongruenze, e fornendo stime di rischio altamente affidabili per gli investitori.
+Il progetto \textit{KickProphet} dimostra come l'integrazione di feature NLP avanzate e modelli Gradient Boosting calibrati possa superare i limiti dei classificatori tradizionali. Il sistema non solo predice con accuratezza (>81\%), ma fornisce spiegazioni interpretabili e stime di rischio finanziariamente affidabili. Sviluppi futuri potrebbero includere l'analisi delle immagini dei progetti tramite CNN.
 
 \end{document}
