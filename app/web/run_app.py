@@ -3,15 +3,18 @@ import os
 from flask import Flask, render_template, request, jsonify
 
 # Add project root to sys.path to allow imports from app.src
+# Add project root to sys.path to allow imports from app.src
+# We need to go up two levels: app/web -> app -> [root]
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-print(f"DEBUG: sys.path[0] = {sys.path[0]}")
-
-
-
-from app.src.predict import predict_success
+# Avoid name collision with 'app' package by ensuring we import from project root
+try:
+    from app.src.predict import predict_success
+except ImportError:
+    # Fallback if running from root
+    from src.predict import predict_success
 
 app = Flask(__name__)
 
