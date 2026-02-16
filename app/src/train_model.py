@@ -44,17 +44,31 @@ def load_data():
 
 def get_model_params():
     """Carica i parametri ottimali se esistono, altrimenti usa i default."""
-    final_params = config.LGBM_DEFAULT_PARAMS.copy()
+    lgbm_params = config.LGBM_DEFAULT_PARAMS.copy()
+    xgb_params = config.XGB_DEFAULT_PARAMS.copy()
     
+    # Load LGBM Params
     if os.path.exists(config.OPTUNA_PARAMS_PATH):
-        print(f"📖 Loaded optimized parameters from: {config.OPTUNA_PARAMS_PATH}")
+        print(f"📖 Loaded optimized LGBM parameters from: {config.OPTUNA_PARAMS_PATH}")
         with open(config.OPTUNA_PARAMS_PATH, 'r') as f:
             best_params = json.load(f)
-            final_params.update(best_params)
+            lgbm_params.update(best_params)
     else:
-        print("💡 Using default parameters.")
+        print("💡 Using default LGBM parameters.")
+
+    # Load XGB Params
+    if os.path.exists(config.OPTUNA_XGB_PARAMS_PATH):
+        print(f"📖 Loaded optimized XGB parameters from: {config.OPTUNA_XGB_PARAMS_PATH}")
+        with open(config.OPTUNA_XGB_PARAMS_PATH, 'r') as f:
+            best_params = json.load(f)
+            # Remove deprecated param just in case
+            if 'use_label_encoder' in best_params:
+                del best_params['use_label_encoder']
+            xgb_params.update(best_params)
+    else:
+        print("💡 Using default XGB parameters.")
         
-    return final_params
+    return lgbm_params, xgb_params
 
 def optimize_threshold(y_true, y_proba, beta=0.5):
     """
@@ -86,7 +100,7 @@ def optimize_threshold(y_true, y_proba, beta=0.5):
     print(f"        -> Recall:    {recalls[best_idx]:.4f}")
     return best_thresh
 
-def train_ensemble(X_train, y_train, lgbm_params):
+def train_ensemble(X_train, y_train, lgbm_params, xgb_params):
     """
     Trains an Ensemble of LightGBM and XGBoost.
     Returns the Calibrated VotingClassifier.
@@ -95,7 +109,7 @@ def train_ensemble(X_train, y_train, lgbm_params):
     
     # 1. Define Base Models
     lgbm_clf = LGBMClassifier(**lgbm_params)
-    xgb_clf = XGBClassifier(**config.XGB_DEFAULT_PARAMS)
+    xgb_clf = XGBClassifier(**xgb_params)
     
     # 2. Voting Classifier
     voting_clf = VotingClassifier(
@@ -244,8 +258,8 @@ def main():
         X_train, y_train, X_test, y_test = load_data()
         
         # 2. Train Ensemble
-        params = get_model_params()
-        calibrated_model, base_voting_model = train_ensemble(X_train, y_train, params)
+        lgbm_params, xgb_params = get_model_params()
+        calibrated_model, base_voting_model = train_ensemble(X_train, y_train, lgbm_params, xgb_params)
         
         # 3. Find Best Threshold (CROSS-VALIDATION)
         # We generate "clean" predictions on training data to optimize threshold without overfitting.

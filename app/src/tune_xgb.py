@@ -27,9 +27,9 @@ def objective(trial, X, y):
     
     # Spazio di ricerca degli iperparametri XGBoost
     params = {
-        'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
+        'n_estimators': trial.suggest_int('n_estimators', 100, 800),
         'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-        'max_depth': trial.suggest_int('max_depth', 3, 10),
+        'max_depth': trial.suggest_int('max_depth', 3, 8),
         'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
         'gamma': trial.suggest_float('gamma', 0, 0.5),
         'subsample': trial.suggest_float('subsample', 0.5, 1.0),
@@ -37,9 +37,9 @@ def objective(trial, X, y):
         'reg_alpha': trial.suggest_float('reg_alpha', 1e-8, 10.0, log=True),
         'reg_lambda': trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True),
         'random_state': 42,
-        'n_jobs': -1,
-        'eval_metric': 'logloss',
-        'use_label_encoder': False
+        'n_jobs': 4,
+        'tree_method': 'hist',  # Much faster and memory efficient
+        'eval_metric': 'logloss'
     }
     
     model = XGBClassifier(**params)
@@ -69,7 +69,7 @@ def main():
     study = optuna.create_study(direction='maximize', study_name='xgb_optimization')
     
     # 3. Esecuzione ricerca
-    n_trials = 50
+    n_trials = 20
     print(f"[>] Avvio ricerca con {n_trials} trials (Objective: Negative Log Loss)...")
     study.optimize(lambda trial: objective(trial, X, y), n_trials=n_trials)
     
