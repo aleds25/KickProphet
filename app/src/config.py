@@ -23,6 +23,7 @@ TEST_DATA_PATH = os.path.join(DATA_DIR, 'KICKSTARTER_TEST.csv')
 
 MODEL_PATH = os.path.join(MODELS_DIR, 'final_model.joblib')
 OPTUNA_PARAMS_PATH = os.path.join(MODELS_DIR, 'best_params_lgbm.json')
+OPTUNA_XGB_PARAMS_PATH = os.path.join(MODELS_DIR, 'best_params_xgb.json')
 
 # ──────────────────────────────────────────────
 #  FEATURES & COLUMNS

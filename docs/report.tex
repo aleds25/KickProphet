@@ -117,23 +117,6 @@ Brier Score (Calibrazione) & 0.1264 \\
 \caption{Risultati sul Test Set Aggiornati}
 \end{table}
 
-\subsection{Test di Robustezza Semantica}
-Per verificare l'efficacia delle nuove feature NLP, il modello è stato sottoposto a stress-test specifici (\texttt{test\_scenarios.py}) per simulare casi limite:
-
-\begin{enumerate}
-    \item \textbf{Input "Garbage"}: Un progetto con categoria forte (Hardware) ma descrizione casuale ("asdfghjkl").
-    \begin{itemize}
-        \item \textit{Risultato}: Probabilità di successo crollata al \textbf{6.6\%} (Fail).
-        \item \textit{Analisi}: Le metriche \texttt{avg\_word\_len} e \texttt{digit\_ratio} hanno correttamente identificato il testo come non valido.
-    \end{itemize}
-    \item \textbf{Input Incoerente}: Un progetto artistico ("Oil Painting") inserito forzatamente nella categoria Hardware (che ha un baseline di successo elevato).
-    \begin{itemize}
-        \item \textit{Risultato}: Probabilità di successo crollata al \textbf{6.5\%} (Fail).
-        \item \textit{Analisi}: Il \textbf{Coherence Score} ha rilevato la discrepanza semantica tra descrizione e categoria, penalizzando fortemente il progetto nonostante la categoria favorevole.
-    \end{itemize}
-\end{enumerate}
-
-Questi test confermano che il modello non è più "cieco" al testo, ma integra attivamente la qualità e la coerenza della descrizione nel processo decisionale.
 
 \section{Conclusione}
 Il progetto \textit{KickProphet} ha dimostrato che è possibile predire il successo di una campagna Kickstarter con elevata accuratezza (81.5\%+) integrando dati strutturati e un'analisi semantica del testo di nuova generazione.

@@ -245,7 +245,6 @@ def feature_engineering_fit_transform(df):
     
     # 5. Target Encoding (Smoothing)
     print("[*] Target Encoding...")
-    # ... (rest remains similar but carefully merged)
     global_mean = df[config.TARGET_COL].mean()
     
     # Sub-category
@@ -255,7 +254,7 @@ def feature_engineering_fit_transform(df):
     smooth_weight = 10
     smooth_means = (counts * means + smooth_weight * global_mean) / (counts + smooth_weight)
     
-    # Save Artifacts
+    # Save Target Encoding Artifacts
     encoding_map = {
         'sub_category': smooth_means.to_dict(),
         'global_mean': global_mean
@@ -263,52 +262,21 @@ def feature_engineering_fit_transform(df):
     joblib.dump(encoding_map, os.path.join(config.ARTIFACTS_DIR, 'target_encodings.joblib'))
     
     df['sub_cat_encoded'] = df['sub_category'].map(smooth_means)
-    
-    # 6. Drop Text Columns
-    df = df.drop(columns=config.TEXT_COLS_TO_DROP + ['sub_category'], errors='ignore')
-    
-    return df
 
-def feature_engineering_transform_new(df, artifacts):
-    """
-    Applies transformations to NEW data using saved artifacts.
-    No fitting, no target usage.
-    """
-    # 1. Goal Relative to Category
-    sub_cat_medians = artifacts['sub_cat_medians']
-    global_median = artifacts['global_goal_median']
-    
-    df['sub_cat_median'] = df['sub_category'].map(sub_cat_medians).fillna(global_median)
-    df['goal_to_cat_diff'] = df['goal_usd_log'] - df['sub_cat_median']
-    df.drop(columns=['sub_cat_median'], inplace=True)
-
-    # 2. Target Encoding (Map)
-    target_enc_map = artifacts['target_enc_map']
-    global_mean = artifacts['target_enc_global_mean']
-    
-    # Check if sub_category exists (might be one-hot encoded later, but here we expect raw)
-    if 'sub_category' in df.columns:
-        df['sub_category'] = df['sub_category'].map(target_enc_map).fillna(global_mean)
-
-    # 3. Imputation
-    impute_medians = artifacts['impute_medians']
-    for col, median_val in impute_medians.items():
+    # 6. Imputation Statistics (Fit)
+    print("[*] Calculating & Saving Imputation Statistics...")
+    impute_stats = {}
+    for col in config.NUM_COLS_IMPUTE:
         if col in df.columns:
+            median_val = df[col].median()
+            impute_stats[col] = median_val
             df[col] = df[col].fillna(median_val)
     
-    for col in config.CAT_COLS_IMPUTE:
-        if col in df.columns:
-            df[col] = df[col].fillna('Unknown')
-
-    # 4. TF-IDF
-    tfidf = artifacts['tfidf_vectorizer']
-    if 'full_text' in df.columns:
-        df['text_clean'] = df['full_text'].apply(clean_text)
-        tfidf_data = tfidf.transform(df['text_clean'])
-        tfidf_cols = [f'word_{w}' for w in tfidf.get_feature_names_out()]
-        df_tfidf = pd.DataFrame(tfidf_data.toarray(), columns=tfidf_cols, index=df.index)
-        df = pd.concat([df, df_tfidf], axis=1)
-
+    joblib.dump(impute_stats, os.path.join(config.ARTIFACTS_DIR, 'imputation_stats.joblib'))
+    
+    # 7. Drop Text Columns
+    df = df.drop(columns=config.TEXT_COLS_TO_DROP + ['sub_category'], errors='ignore')
+    
     return df
 
 def feature_engineering_transform_new(df):
@@ -324,7 +292,15 @@ def feature_engineering_transform_new(df):
     nlp_stats = df['full_text'].astype(str).apply(lambda x: pd.Series(get_nlp_features(x)))
     df[['sentiment_polarity', 'sentiment_subjectivity', 'readability_score', 'avg_word_len', 'digit_ratio']] = nlp_stats
     
-    # 2. Embeddings & Coherence
+    # 2. Imputation (Apply Saved Medians)
+    print("[*] Applying Imputation...")
+    if os.path.exists(os.path.join(config.ARTIFACTS_DIR, 'imputation_stats.joblib')):
+        impute_stats = joblib.load(os.path.join(config.ARTIFACTS_DIR, 'imputation_stats.joblib'))
+        for col, median_val in impute_stats.items():
+            if col in df.columns:
+                df[col] = df[col].fillna(median_val)
+    
+    # 3. Embeddings & Coherence
     print("[*] Generating Semantic Embeddings & Coherence...")
     model = SentenceTransformer(config.NLP_MODEL_NAME) # Re-load model (inefficient but safe script-wise)
     text_embeddings = model.encode(df['full_text'].fillna("").tolist(), show_progress_bar=True, normalize_embeddings=True)
@@ -340,7 +316,7 @@ def feature_engineering_transform_new(df):
         
     embeddings = text_embeddings
     
-    # 3. PCA Transform
+    # 4. PCA Transform
     print("[*] PCA Transform...")
     pca = joblib.load(os.path.join(config.ARTIFACTS_DIR, 'pca_model.joblib'))
     embeddings_pca = pca.transform(embeddings)
@@ -349,7 +325,7 @@ def feature_engineering_transform_new(df):
     df_pca = pd.DataFrame(embeddings_pca, columns=pca_cols, index=df.index)
     df = pd.concat([df, df_pca], axis=1)
     
-    # 4. TF-IDF Transform
+    # 5. TF-IDF Transform
     print("[*] TF-IDF Transform...")
     tfidf = joblib.load(os.path.join(config.ARTIFACTS_DIR, 'tfidf_vectorizer.joblib'))
     tfidf_matrix = tfidf.transform(df['text_clean'])
@@ -358,12 +334,13 @@ def feature_engineering_transform_new(df):
     df_tfidf = pd.DataFrame(tfidf_matrix.toarray(), columns=tfidf_cols, index=df.index)
     df = pd.concat([df, df_tfidf], axis=1)
     
-    # 5. Target Encoding Map
+    # 6. Target Encoding Map
     print("[*] Applying Target Encoding...")
     enc_map = joblib.load(os.path.join(config.ARTIFACTS_DIR, 'target_encodings.joblib'))
-    df['sub_cat_encoded'] = df['sub_category'].map(enc_map['sub_category']).fillna(enc_map['global_mean'])
+    if 'sub_category' in df.columns:
+        df['sub_cat_encoded'] = df['sub_category'].map(enc_map['sub_category']).fillna(enc_map['global_mean'])
 
-    # 6. Drop Text Columns
+    # 7. Drop Text Columns
     df = df.drop(columns=config.TEXT_COLS_TO_DROP + ['sub_category'], errors='ignore')
     
     return df
