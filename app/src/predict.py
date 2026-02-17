@@ -237,6 +237,49 @@ def predict_success(data):
     X = prepare_single_sample(data, artifacts)
     
     model = artifacts['model']
+    
+    # --- GARBAGE DETECTION GUARDRAIL ---
+    # Heuristics to catch gibberish or completely irrelevant text
+    avg_word_len = X['avg_word_len'].iloc[0]
+    coherence = X['desc_cat_similarity'].iloc[0]
+    sentiment_p = X['sentiment_polarity'].iloc[0]
+    
+    is_garbage = False
+    garbage_reason = ""
+    
+    # Rule 1: Extreme Word Length (Gibberish)
+    # e.g. "sdfdsfdsfds..." -> avg_word_len goes very high
+    if avg_word_len > 25:
+        is_garbage = True
+        garbage_reason = f"Avg Word Length too high ({avg_word_len:.1f})"
+        
+    # Rule 2: Irrelevant Content (Low Coherence)
+    # But be careful not to flag just "creative" text. Verify with other metrics if possible.
+    # Coherence < 0.05 is extremely low (basically orthogonal/random).
+    elif coherence < 0.05:
+         is_garbage = True
+         garbage_reason = f"Content irrelevant to category (Coherence: {coherence:.2f})"
+
+    # Rule 3: Text Repetition / Low Entropy
+    # Check unique word ratio on the raw input text
+    full_text_raw = (str(data.get('name', '')) + " " + str(data.get('blurb', ''))).lower()
+    words = full_text_raw.split()
+    if len(words) > 20: # Only check if text is long enough to be repetitive
+        unique_ratio = len(set(words)) / len(words)
+        if unique_ratio < 0.15: # < 15% unique words implies heavy looping
+             is_garbage = True
+             garbage_reason = f"Text is repetitive (Unique Ratio: {unique_ratio:.2f})"
+    
+    if is_garbage:
+        print(f"[!] GARBAGE DETECTED: {garbage_reason}. Forcing FAIL.")
+        return {
+            'success_probability': 0.0100,
+            'prediction': 'FAIL',
+            'percent': "1.0%",
+            'warning': "Input validation failed: Ensure description is readable and relevant."
+        }
+    # -----------------------------------
+
     prob = model.predict_proba(X)[0][1]
     pred = model.predict(X)[0]
     
