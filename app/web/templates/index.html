@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KickProphet | AI Campaign Predictor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <!-- Animated Backgrounds -->
+    <div class="background-stars"></div>
+    <div class="background-glob"></div>
+
+    <div class="container">
+        <div class="glass-panel">
+            <header>
+                <img src="{{ url_for('static', filename='img/LogoKickProphet.png') }}" alt="KickProphet AI"
+                    class="logo-img">
+                <h1>Predict Your Campaign's Destiny</h1>
+                <p class="subtitle">Advanced machine learning analytics to forecast your Kickstarter success probability
+                    with precision.</p>
+            </header>
+
+            <main>
+                <div id="toast-container"></div>
+                <form id="prediction-form" novalidate>
+                    <div class="form-grid">
+                        <!-- Project Basics -->
+                        <div class="form-group full-width">
+                            <label for="name">Project Name</label>
+                            <input type="text" id="name" name="name" placeholder="E.g. The Ultimate Smart Coffee Maker"
+                                minlength="2" required>
+                        </div>
+
+                        <div class="form-group full-width">
+                            <label for="blurb">Description</label>
+                            <textarea id="blurb" name="blurb" rows="3"
+                                placeholder="Describe your project (min 100 characters)..." required></textarea>
+                            <span class="char-counter" id="blurb-counter">0 / 100</span>
+                        </div>
+
+                        <!-- Financials & Time -->
+                        <div class="form-group">
+                            <label for="goal">Funding Goal</label>
+                            <div class="input-with-icon">
+                                <span class="currency-symbol">$</span>
+                                <input type="number" id="goal" name="goal" placeholder="50000" min="1" required>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="currency">Currency</label>
+                            <select id="currency" name="currency">
+                                <option value="USD" selected>USD ($)</option>
+                                <option value="EUR">EUR (€)</option>
+                                <option value="GBP">GBP (£)</option>
+                                <option value="CAD">CAD ($)</option>
+                                <option value="AUD">AUD ($)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="duration_days">Duration (Days)</label>
+                            <input type="number" id="duration_days" name="duration_days" placeholder="30" value="30"
+                                min="1" max="60" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="preparation_days">Preparation Days</label>
+                            <input type="number" id="preparation_days" name="preparation_days" placeholder="e.g. 14"
+                                value="0" min="0" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="launch_date">Planned Launch Date</label>
+                            <input type="text" id="launch_date" name="launch_date" placeholder="Select date" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="country">Country</label>
+                            <select id="country" name="country">
+                                <option value="US" selected>United States</option>
+                                <option value="GB">United Kingdom</option>
+                                <option value="CA">Canada</option>
+                                <option value="AU">Australia</option>
+                                <option value="DE">Germany</option>
+                                <option value="FR">France</option>
+                                <option value="IT">Italy</option>
+                                <option value="ES">Spain</option>
+                            </select>
+                        </div>
+
+                        <!-- Toggles -->
+                        <div class="toggle-group">
+                            <label for="has_video" class="toggle-label">Has Video?</label>
+                            <label class="switch">
+                                <input type="checkbox" id="has_video" name="has_video">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+
+                        <div class="toggle-group">
+                            <label for="prelaunch_activated" class="toggle-label">Pre-launch Page?</label>
+                            <label class="switch">
+                                <input type="checkbox" id="prelaunch_activated" name="prelaunch_activated">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+
+                        <!-- Categorization -->
+                        <div class="form-group">
+                            <label for="category">Category</label>
+                            <select id="category" name="category" required>
+                                <option value="" disabled selected>Select Category</option>
+                                <!-- Options populated dynamically -->
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="sub_category">Sub-Category</label>
+                            <select id="sub_category" name="sub_category" required disabled>
+                                <option value="" disabled selected>Select a Category First</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="predict-btn">
+                        <span class="btn-text">Generate Prediction</span>
+                        <span class="loader"></span>
+                    </button>
+                </form>
+
+                <!-- Result Overlay -->
+                <div id="result-card" class="hidden">
+                    <div class="result-header">
+                        <h2>Prediction Result</h2>
+                        <span class="close-btn">&times;</span>
+                    </div>
+                    <div class="result-body">
+                        <span class="prediction-label">Success Probability</span>
+                        <h2 id="prediction-text">Loading...</h2>
+
+                        <div class="progress-container">
+                            <div class="progress-bar" id="progress-bar"></div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+
+</html>
