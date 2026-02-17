@@ -138,18 +138,11 @@ header {
     margin-bottom: 28px;
 }
 
-.logo {
-    display: inline-block;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.35em;
-    text-transform: uppercase;
-    color: var(--green);
-    padding: 5px 14px;
-    border: 1px solid var(--green-dim);
-    border-radius: 100px;
-    background: var(--green-dim);
-    margin-bottom: 12px;
+.logo-img {
+    display: block;
+    max-width: 200px;
+    height: auto;
+    margin: 0 auto 16px;
 }
 
 h1 {
