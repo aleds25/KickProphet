@@ -64,6 +64,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Live Character Counter for Blurb
+    const blurbInput = document.getElementById('blurb');
+    const blurbCounter = document.getElementById('blurb-counter');
+    if (blurbInput && blurbCounter) {
+        blurbInput.addEventListener('input', () => {
+            const len = blurbInput.value.length;
+            blurbCounter.textContent = len + ' / 100';
+            blurbCounter.classList.toggle('valid', len >= 100);
+        });
+    }
+
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
