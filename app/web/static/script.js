@@ -165,7 +165,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const resultCard = document.getElementById('result-card');
         const predictionText = document.getElementById('prediction-text');
         const progressBar = document.getElementById('progress-bar');
-        const progressPercent = document.getElementById('progress-percent');
         const closeBtn = document.querySelector('.close-btn');
 
         resultCard.classList.remove('hidden');
@@ -193,7 +192,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Update Content
         predictionText.textContent = messageText;
-        progressPercent.textContent = result.percent;
 
         // Reset styles
         progressBar.style.width = '0%';
