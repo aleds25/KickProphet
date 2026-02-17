@@ -130,6 +130,21 @@ def prepare_single_sample(data, artifacts):
     coherence = cosine_similarity([text_embedding], [cat_embedding])[0][0]
     df['desc_cat_similarity'] = coherence
 
+    # --- SEMANTIC GATING & CLAMPING FOR PREPARATION DAYS ---
+    raw_prep_days = float(data.get('preparation_days', 0))
+    clamped_days = min(raw_prep_days, 60)
+    
+    # Semantic Gating: If the description is irrelevant (low coherence), revoke the bonus.
+    if coherence < 0.17:
+        print(f"    -> [!] Detected Low Quality/Irrelevant Text (Coherence: {coherence:.2f}). Ignoring Preparation Days.")
+        final_prep_days = 0
+    else:
+        final_prep_days = clamped_days
+        
+    # Re-calculate the log feature with the final value
+    df['preparation_days_log'] = np.log1p(final_prep_days)
+    # -------------------------------------------------------
+
     # PCA (Expects list of embeddings)
     embeddings_list = [text_embedding]
     pca_out = artifacts['pca'].transform(embeddings_list)

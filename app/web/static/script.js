@@ -50,8 +50,37 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 500);
     });
 
+    // Set Min Date to Today
+    const today = new Date().toISOString().split('T')[0];
+    const launchDateInput = document.getElementById('launch_date');
+    if (launchDateInput) launchDateInput.setAttribute('min', today);
+
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
+
+        // VALIDATION
+        const duration = parseInt(document.getElementById('duration_days').value);
+        const goal = parseFloat(document.getElementById('goal').value);
+        const prepDays = parseFloat(document.getElementById('preparation_days').value);
+        const launchDateVal = document.getElementById('launch_date').value;
+
+        if (duration < 1 || duration > 60) {
+            alert("Duration must be between 1 and 60 days.");
+            return;
+        }
+        if (goal < 1) {
+            alert("Goal must be at least 1.");
+            return;
+        }
+        if (prepDays < 0) {
+            alert("Preparation Days cannot be negative.");
+            return;
+        }
+
+        if (launchDateVal < today) {
+            alert("Launch Date cannot be in the past.");
+            return;
+        }
 
         // Show Loading State
         predictBtn.classList.add('loading');

@@ -21,7 +21,8 @@
             <header>
                 <div class="logo">KICKPROPHET AI</div>
                 <h1>Predict Your Campaign's Destiny</h1>
-                <p class="subtitle">Advanced machine learning analytics to forecast your Kickstarter success probability with precision.</p>
+                <p class="subtitle">Advanced machine learning analytics to forecast your Kickstarter success probability
+                    with precision.</p>
             </header>
 
             <main>
@@ -30,12 +31,14 @@
                         <!-- Project Basics -->
                         <div class="form-group full-width">
                             <label for="name">Project Name</label>
-                            <input type="text" id="name" name="name" placeholder="E.g. The Ultimate Smart Coffee Maker" required>
+                            <input type="text" id="name" name="name" placeholder="E.g. The Ultimate Smart Coffee Maker"
+                                required>
                         </div>
 
                         <div class="form-group full-width">
                             <label for="blurb">Short Description (Blurb)</label>
-                            <textarea id="blurb" name="blurb" rows="3" placeholder="Describe your project in a catchy way..." required></textarea>
+                            <textarea id="blurb" name="blurb" rows="3"
+                                placeholder="Describe your project in a catchy way..." required></textarea>
                         </div>
 
                         <!-- Financials & Time -->
@@ -43,7 +46,7 @@
                             <label for="goal">Funding Goal</label>
                             <div class="input-with-icon">
                                 <span class="currency-symbol">$</span>
-                                <input type="number" id="goal" name="goal" placeholder="50000" required>
+                                <input type="number" id="goal" name="goal" placeholder="50000" min="1" required>
                             </div>
                         </div>
 
@@ -60,12 +63,14 @@
 
                         <div class="form-group">
                             <label for="duration_days">Duration (Days)</label>
-                            <input type="number" id="duration_days" name="duration_days" placeholder="30" value="30" required>
+                            <input type="number" id="duration_days" name="duration_days" placeholder="30" value="30"
+                                min="1" max="60" required>
                         </div>
 
                         <div class="form-group">
                             <label for="preparation_days">Preparation Days</label>
-                            <input type="number" id="preparation_days" name="preparation_days" placeholder="e.g. 14" value="0" required>
+                            <input type="number" id="preparation_days" name="preparation_days" placeholder="e.g. 14"
+                                value="0" min="0" required>
                         </div>
 
                         <div class="form-group">
@@ -136,7 +141,7 @@
                     <div class="result-body">
                         <span class="prediction-label">Success Probability</span>
                         <h2 id="prediction-text">Loading...</h2>
-                        
+
                         <div class="progress-container">
                             <div class="progress-bar" id="progress-bar"></div>
                         </div>
