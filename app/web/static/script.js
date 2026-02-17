@@ -67,29 +67,41 @@ document.addEventListener('DOMContentLoaded', () => {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        // VALIDATION
+        // VALIDATION — Custom Toast
+        function showToast(msg) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = msg;
+            container.appendChild(toast);
+            // Trigger animation
+            requestAnimationFrame(() => toast.classList.add('show'));
+            setTimeout(() => {
+                toast.classList.remove('show');
+                toast.addEventListener('transitionend', () => toast.remove());
+            }, 3500);
+        }
+
+        const nameVal = document.getElementById('name').value.trim();
+        const blurbVal = document.getElementById('blurb').value.trim();
         const duration = parseInt(document.getElementById('duration_days').value);
         const goal = parseFloat(document.getElementById('goal').value);
         const prepDays = parseFloat(document.getElementById('preparation_days').value);
         const launchDateVal = document.getElementById('launch_date').value;
+        const category = document.getElementById('category').value;
+        const subCategory = document.getElementById('sub_category').value;
 
-        if (duration < 1 || duration > 60) {
-            alert("Duration must be between 1 and 60 days.");
-            return;
-        }
-        if (goal < 1) {
-            alert("Goal must be at least 1.");
-            return;
-        }
-        if (prepDays < 0) {
-            alert("Preparation Days cannot be negative.");
-            return;
-        }
-
-        if (launchDateVal < today) {
-            alert("Launch Date cannot be in the past.");
-            return;
-        }
+        if (!nameVal) { showToast("Please enter a Project Name."); return; }
+        if (nameVal.length < 2) { showToast("Project Name must be at least 2 characters."); return; }
+        if (!blurbVal) { showToast("Please enter a Description."); return; }
+        if (blurbVal.length < 100) { showToast("Description must be at least 100 characters. Currently: " + blurbVal.length); return; }
+        if (!goal || goal < 1) { showToast("Funding Goal must be at least $1."); return; }
+        if (!duration || duration < 1 || duration > 60) { showToast("Duration must be between 1 and 60 days."); return; }
+        if (prepDays < 0) { showToast("Preparation Days cannot be negative."); return; }
+        if (!launchDateVal) { showToast("Please select a Launch Date."); return; }
+        if (launchDateVal < today) { showToast("Launch Date cannot be in the past."); return; }
+        if (!category) { showToast("Please select a Category."); return; }
+        if (!subCategory) { showToast("Please select a Sub-Category."); return; }
 
         // Show Loading State
         predictBtn.classList.add('loading');
