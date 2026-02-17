@@ -50,10 +50,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 500);
     });
 
-    // Set Min Date to Today
+    // Initialize Flatpickr (Modern Date Picker)
     const today = new Date().toISOString().split('T')[0];
     const launchDateInput = document.getElementById('launch_date');
-    if (launchDateInput) launchDateInput.setAttribute('min', today);
+    if (launchDateInput) {
+        flatpickr(launchDateInput, {
+            minDate: "today",
+            maxDate: "2035-12-31",
+            dateFormat: "Y-m-d",
+            disableMobile: true,
+            animate: true,
+            locale: { firstDayOfWeek: 1 }
+        });
+    }
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
